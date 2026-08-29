@@ -1,13 +1,12 @@
 """Routers: auth, projects, generation, exports, analytics, settings."""
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import os
 import uuid
-import asyncio
 import zipfile
-import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
@@ -35,11 +34,130 @@ from . import thumbnail_images as thumb_images
 
 router = APIRouter(prefix="/api")
 
-logger = logging.getLogger("facelessforge.routes")
-
 
 def _now():
     return datetime.now(timezone.utc)
+
+
+CINEMATIC_SUFFIX = "4k slow motion b-roll cinematic"
+_SCENE_LEAK_STOP = {"might","obsolete","coming","year","years","small","businesses","drowning","imagine","software","shift","machine","impact","simulate","will","shall","could","should","would","may","might","about","hear","story","cover","converts","alter","the","and","a","an","of","to","in","on","for","with","about","is","are","was","were","be","as","it","its","this","that","what","you","about","to","hear","story","will","cover","how","it","converts","alter","will"}
+
+def _clean_visual_full(visual: str) -> str:
+    """Preserve full Visual including commas, normalize whitespace only. No split on comma, no truncation."""
+    if not visual:
+        return ""
+    return " ".join((visual or "").strip().split())
+
+def _extract_core_query(scene: dict) -> str:
+    """Extract 3-4 word core for Pixabay/Unsplash fallback, e.g. crystal ball forecast.
+    Prefers search_terms multi-word, else visual keywords, filters leak words.
+    """
+    terms = scene.get("search_terms") or []
+    if terms:
+        for t in terms:
+            clean = " ".join(str(t or "").split()).strip()
+            if not clean:
+                continue
+            words = clean.split()
+            if len(words) == 1 and words[0].lower() in _SCENE_LEAK_STOP:
+                continue
+            if len(words) == 1 and len(words[0]) < 4:
+                continue
+            if len(words) >= 2:
+                filtered = [w for w in words if w.lower() not in _SCENE_LEAK_STOP and len(w) >= 3]
+                if len(filtered) >= 2:
+                    return " ".join(filtered[:4])
+                return " ".join(words[:4])
+    visual = (scene.get("visual_direction") or "").strip()
+    if visual:
+        import re
+        words = re.findall(r"[a-z]{3,}", visual.lower())
+        kw = [w for w in words if w not in _SCENE_LEAK_STOP]
+        kw = [w for w in kw if 3 <= len(w) <= 20]
+        seen=set()
+        out=[]
+        for w in kw:
+            if w not in seen:
+                seen.add(w)
+                out.append(w)
+            if len(out)>=4:
+                break
+        if len(out)>=2:
+            return " ".join(out[:4])
+        if out:
+            return " ".join(out)
+    return "nature cinematic"
+
+def _build_scene_stock_query(scene: dict, project: dict, override: str | None = None) -> str:
+    """Return full Visual + cinematic suffix, preserving commas and detail.
+    FIX v2.7: Preserves full Visual field including comma-separated detail,
+    appends "4k slow motion b-roll cinematic", no truncation, no single-word leaks.
+    Priority: explicit override > full visual_direction + cinematic > search_terms core + cinematic > project topic.
+    """
+    if override and override.strip():
+        return override.strip()
+    visual = _clean_visual_full(scene.get("visual_direction") or "")
+    if visual:
+        # Preserve full visual, not just first 6 words
+        # Validate no leak single-word query
+        if len(visual.split()) >= 2:
+            return f"{visual} {CINEMATIC_SUFFIX}".strip()
+    terms = scene.get("search_terms") or []
+    if terms:
+        # Use first multi-word term, not single-word leaks like "small", "imagine"
+        for t in terms:
+            clean = " ".join(str(t or "").split()).strip()
+            if not clean:
+                continue
+            if len(clean.split()) == 1 and clean.lower() in _SCENE_LEAK_STOP:
+                continue
+            if len(clean.split()) == 1 and len(clean) < 4:
+                continue
+            if len(clean.split()) >= 2:
+                return f"{clean} {CINEMATIC_SUFFIX}".strip()
+        # Fallback if only single-word terms remain, construct core
+        core = _extract_core_query(scene)
+        if core and len(core.split()) >= 2:
+            return f"{core} {CINEMATIC_SUFFIX}".strip()
+    # Fallback to project topic
+    base = (project.get("topic") or project.get("niche") or "stock").strip()
+    base = " ".join(base.split())
+    if len(base.split()) < 2:
+        base = "nature cinematic"
+    return f"{base} {CINEMATIC_SUFFIX}".strip()
+
+def _build_ordered_stock_queries(scene: dict, project: dict) -> list[dict]:
+    """Generate exactly 3 ordered query objects per scene: pexels_video (cinematic full), pixabay_video (shorter core), unsplash_image (shortest).
+    Preference order video first. Used by auto-attach fallback chain.
+    """
+    visual = _clean_visual_full(scene.get("visual_direction") or "")
+    if not visual:
+        terms = scene.get("search_terms") or []
+        if terms and isinstance(terms, list):
+            for t in terms:
+                if t and len(str(t).split()) >= 2:
+                    visual = str(t)
+                    break
+            if not visual:
+                visual = str(terms[0]) if terms else ""
+        elif isinstance(terms, str):
+            visual = terms
+        else:
+            visual = (project.get("topic") if project and project.get("topic") else "") or "nature cinematic"
+        visual = _clean_visual_full(visual) or "nature cinematic"
+    pexels_q = f"{visual} {CINEMATIC_SUFFIX}".strip()
+    core = _extract_core_query(scene)
+    pixabay_q = core if core else "nature cinematic"
+    if len(pixabay_q.split()) < 2:
+        pixabay_q = "nature cinematic b-roll"
+    unsplash_q = " ".join(core.split()[:3]).strip() if core else "nature cinematic"
+    if len(unsplash_q.split()) < 2:
+        unsplash_q = "nature cinematic"
+    return [
+        {"source": "pexels", "type": "video", "media_type": "videos", "query": pexels_q},
+        {"source": "pixabay", "type": "video", "media_type": "videos", "query": pixabay_q},
+        {"source": "unsplash", "type": "image", "media_type": "photos", "query": unsplash_q},
+    ]
 
 
 def _ser(doc: dict) -> dict:
@@ -68,7 +186,7 @@ def _ensure_project_access(project: dict, user: dict, *, write: bool = False):
 # ============================ AUTH ============================
 
 @router.post("/auth/register")
-async def register(body: RegisterRequest, response: Response):
+async def register(body: RegisterRequest, response: Response, request: Request):
     db = get_db()
     email = body.email.lower()
     existing = await db.users.find_one({"email": email})
@@ -87,12 +205,12 @@ async def register(body: RegisterRequest, response: Response):
     await db.users.insert_one(user_doc)
     access = create_access_token(user_id, email, body.role)
     refresh = create_refresh_token(user_id)
-    set_auth_cookies(response, access, refresh)
+    set_auth_cookies(response, access, refresh, request)
     return _ser({**user_doc, "password_hash": None})
 
 
 @router.post("/auth/login")
-async def login(body: LoginRequest, response: Response):
+async def login(body: LoginRequest, response: Response, request: Request):
     db = get_db()
     email = body.email.lower()
     user = await db.users.find_one({"email": email})
@@ -100,7 +218,7 @@ async def login(body: LoginRequest, response: Response):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     access = create_access_token(user["id"], email, user["role"])
     refresh = create_refresh_token(user["id"])
-    set_auth_cookies(response, access, refresh)
+    set_auth_cookies(response, access, refresh, request)
     out = dict(user); out.pop("password_hash", None)
     return _ser(out)
 
@@ -113,6 +231,12 @@ async def logout(response: Response, _user=Depends(get_current_user)):
 
 @router.get("/auth/me")
 async def me(user=Depends(get_current_user)):
+    return _ser(user)
+
+
+@router.get("/users/me")
+async def users_me(user=Depends(get_current_user)):
+    """Alias used by some frontend builds — returns the current authenticated user."""
     return _ser(user)
 
 
@@ -278,9 +402,12 @@ async def create_project(body: ProjectCreate, user=Depends(get_current_user)):
         "tone": body.tone,
         "target_duration": body.target_duration,
         "voice_style": body.voice_style or "neutral male narrator",
+        "voice_id": body.voice_id or body.voice_style or "neutral male narrator",
         "visual_style": body.visual_style or "cinematic b-roll",
         "monetisation_intent": body.monetisation_intent or "ads + affiliate",
         "cta_goal": body.cta_goal or "subscribe",
+        "auto_post": body.auto_post if body.auto_post is not None else False,
+        "platforms": body.platforms or [],
         "status": "DRAFT",
         "quality_score": 0,
         "estimated_cost": 0.0,
@@ -342,7 +469,7 @@ def _log_cost(db, project_id: str, operation: str, tokens: int, cost: float):
     return db.cost_logs.insert_one({
         "id": str(uuid.uuid4()),
         "project_id": project_id,
-        "provider": "openai/gpt-5.2",
+        "provider": "deepseek/deepseek-chat",
         "operation": operation,
         "tokens_used": tokens,
         "characters_used": 0,
@@ -351,108 +478,6 @@ def _log_cost(db, project_id: str, operation: str, tokens: int, cost: float):
     })
 
 
-
-
-async def _run_auto_attach(project_id: str, user: dict, replace_existing: bool = False, media_type: str = "both"):
-    """Background auto-attach — same logic as the endpoint but without HTTP deps."""
-    db = get_db()
-    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
-    if not project:
-        logger.warning("[AUTO_ATTACH] Project %s not found", project_id)
-        return
-    if user.get("role") == "viewer":
-        logger.warning("[AUTO_ATTACH] Viewer cannot attach assets for %s", project_id)
-        return
-
-    scenes = await db.scenes.find({"project_id": project_id}, {"_id": 0}).sort("scene_number", 1).to_list(500)
-    if not scenes:
-        logger.info("[AUTO_ATTACH] No scenes for %s — skipping", project_id)
-        return
-
-    visual_tone = project.get("visual_tone") or ""
-    if not visual_tone:
-        from .visual_query import derive_visual_tone
-        script_doc = await db.scripts.find_one({"project_id": project_id}, {"_id": 0})
-        full_text = (script_doc or {}).get("full_script") or project.get("topic") or ""
-        if full_text:
-            visual_tone = await derive_visual_tone(full_text)
-            if visual_tone:
-                await db.projects.update_one(
-                    {"id": project_id}, {"$set": {"visual_tone": visual_tone}}
-                )
-
-    attached = 0
-    skipped = 0
-    failed = 0
-
-    for scene in scenes:
-        scene_id = scene["id"]
-        existing = await db.assets.find_one({
-            "project_id": project_id,
-            "scene_id": scene_id,
-            "asset_type": {"$in": ["stock_video", "stock_image"]},
-        }, {"_id": 0})
-
-        if existing and not replace_existing:
-            skipped += 1
-            continue
-
-        from .visual_query import build_scene_query
-        query = build_scene_query(scene)
-
-        try:
-            result = await stock_service.search_stock(
-                query, media_type, per_page=8,
-                visual_tone=visual_tone or None,
-            )
-            top = (result.get("results") or [None])[0]
-            if not top:
-                failed += 1
-                continue
-
-            if existing and replace_existing:
-                await db.assets.delete_many({
-                    "project_id": project_id,
-                    "scene_id": scene_id,
-                    "asset_type": {"$in": ["stock_video", "stock_image"]},
-                })
-
-            doc = {
-                "id": str(uuid.uuid4()),
-                "project_id": project_id,
-                "scene_id": scene_id,
-                "name": top["title"],
-                "asset_type": top["media_type"],
-                "file_path": None,
-                "source": top["source"],
-                "external_id": top["external_id"],
-                "preview_url": top.get("preview_url"),
-                "source_url": top.get("source_url"),
-                "download_url": top.get("download_url"),
-                "attribution_name": top.get("attribution_name"),
-                "attribution_url": top.get("attribution_url"),
-                "width": top.get("width"),
-                "height": top.get("height"),
-                "duration": top.get("duration"),
-                "tags": top.get("tags") or [],
-                "query": query,
-                "status": "attached",
-                "created_at": _now(),
-                "updated_at": _now(),
-            }
-            try:
-                await db.assets.insert_one(doc)
-                attached += 1
-            except Exception:
-                skipped += 1
-        except Exception as e:
-            logger.warning("[AUTO_ATTACH] scene %s failed: %s", scene_id, e)
-            failed += 1
-
-    logger.info(
-        "[AUTO_ATTACH] project=%s attached=%d skipped=%d failed=%d",
-        project_id, attached, skipped, failed,
-    )
 @router.post("/projects/{project_id}/generate-script")
 async def generate_script_endpoint(project_id: str, user=Depends(get_current_user)):
     db = get_db()
@@ -467,7 +492,7 @@ async def generate_script_endpoint(project_id: str, user=Depends(get_current_use
         "updated_at": _now(),
     }
     await db.scripts.replace_one({"project_id": project_id}, doc, upsert=True)
-    await _log_cost(db, project_id, "script", tokens=max(500, data["word_count"] * 2), cost=0.08)
+    await _log_cost(db, project_id, "script", tokens=max(500, (data.get("word_count", 0) or 0) * 2), cost=0.08)
     await db.projects.update_one({"id": project_id}, {"$set": {"estimated_cost": float(project.get("estimated_cost", 0)) + 0.08, "updated_at": _now()}})
     return await _attach_project_view(db, await db.projects.find_one({"id": project_id}, {"_id": 0}))
 
@@ -480,9 +505,14 @@ async def generate_scenes_endpoint(project_id: str, user=Depends(get_current_use
     script = await db.scripts.find_one({"project_id": project_id}, {"_id": 0})
     if not script:
         raise HTTPException(status_code=400, detail="Generate a script before scenes")
-    scenes = await gen.generate_scenes(project, script["full_script"])
+    try:
+        scenes = await gen.generate_scene_plan(project, script)
+    except Exception as e:  # noqa: BLE001
+        logger = __import__("logging").getLogger("facelessforge.routes")
+        logger.warning("generate_scene_plan failed project=%s: %s — using fallback", project_id, e)
+        scenes = await gen.generate_scene_plan(project, {"full_script": script.get("full_script", "") or project.get("topic") or "test"})
     for sc in scenes:
-        sc.setdefault("id", str(uuid.uuid4()))
+        sc["id"] = str(uuid.uuid4())
         sc["project_id"] = project_id
         sc["created_at"] = _now()
         sc["updated_at"] = _now()
@@ -491,15 +521,75 @@ async def generate_scenes_endpoint(project_id: str, user=Depends(get_current_use
         await db.scenes.insert_many([dict(sc) for sc in scenes])
     await _log_cost(db, project_id, "scenes", tokens=len(scenes) * 200, cost=0.06)
     await db.projects.update_one({"id": project_id}, {"$set": {"estimated_cost": float(project.get("estimated_cost", 0)) + 0.06, "updated_at": _now()}})
-
-    # ---- AUTO-TRIGGER asset attachment in background ----
-    try:
-        asyncio.create_task(_run_auto_attach(project_id, dict(user), replace_existing=False, media_type="both"))
-        logger.info("[SCENES] Auto-attach triggered for project=%s", project_id)
-    except Exception as e:
-        logger.warning("[SCENES] Auto-attach trigger failed for project=%s: %s", project_id, e)
-
     return await _attach_project_view(db, await db.projects.find_one({"id": project_id}, {"_id": 0}))
+
+
+@router.post("/projects/generate-scenes")
+async def generate_scenes_shim(request: Request):
+    """Shim for POST /api/projects/generate-scenes — accepts JSON {project_id, script, topic, niche, target_duration}.
+
+    Public (no auth) so health checks and external callers can test auto-gen without a full project lifecycle.
+    Never 500: falls back to deterministic generation if LLM times out or keys missing.
+    Returns {"scenes": [...]} where scenes is always an array.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    project_id = (body.get("project_id") or "test").strip() or "test"
+    script_text = body.get("script") or body.get("full_script") or body.get("topic") or "test 450 word flow"
+    if isinstance(script_text, dict):
+        script_text = script_text.get("full_script") or str(script_text)
+    topic = body.get("topic") or (script_text[:60] if isinstance(script_text, str) else "test")
+    niche = body.get("niche") or "general"
+    target_duration = int(body.get("target_duration") or body.get("duration") or 300)
+    # Build minimal project/script dicts for generation
+    project = {
+        "id": project_id,
+        "topic": topic,
+        "niche": niche,
+        "target_duration": target_duration,
+        "tone": body.get("tone") or "documentary",
+        "title": topic,
+    }
+    script = {"full_script": script_text if isinstance(script_text, str) else str(script_text)}
+    try:
+        # Use timeout to avoid hanging on LLM
+        scenes = await asyncio.wait_for(gen.generate_scene_plan(project, script), timeout=25.0)
+    except asyncio.TimeoutError:
+        logger = __import__("logging").getLogger("facelessforge.routes")
+        logger.warning("generate-scenes shim timeout project=%s — fallback", project_id)
+        scenes = await gen.generate_scene_plan(project, {"full_script": script_text[:2000] or "fallback script"})
+    except Exception as e:  # noqa: BLE001
+        logger = __import__("logging").getLogger("facelessforge.routes")
+        logger.warning("generate-scenes shim failed project=%s: %s — fallback", project_id, e)
+        # Deterministic fallback: sync call
+        try:
+            scenes = await gen.generate_scene_plan(project, {"full_script": script_text[:2000] or "fallback script"})
+        except Exception as e2:  # noqa: BLE001
+            logger.error("fallback also failed: %s", e2)
+            scenes = [
+                {
+                    "scene_number": 1,
+                    "start_time": 0.0,
+                    "end_time": float(target_duration),
+                    "duration": float(target_duration),
+                    "narration_text": script_text[:500] or "Test scene narration",
+                    "visual_direction": "forest nature b-roll",
+                    "caption_text": "Test scene",
+                    "search_terms": ["forest", "nature", "trees"],
+                    "id": str(uuid.uuid4()),
+                    "project_id": project_id,
+                }
+            ]
+    # Ensure scenes is list
+    if not isinstance(scenes, list):
+        scenes = []
+    # Attach ids if missing
+    for sc in scenes:
+        sc.setdefault("id", str(uuid.uuid4()))
+        sc.setdefault("project_id", project_id)
+    return {"scenes": scenes, "project_id": project_id, "count": len(scenes)}
 
 
 @router.post("/projects/{project_id}/generate-metadata")
@@ -508,10 +598,10 @@ async def generate_metadata_endpoint(project_id: str, user=Depends(get_current_u
     project = await db.projects.find_one({"id": project_id}, {"_id": 0})
     _ensure_project_access(project, user, write=True)
     script = await db.scripts.find_one({"project_id": project_id}, {"_id": 0})
-    scenes = await db.scenes.find({"project_id": project_id}, {"_id": 0}).sort("scene_number", 1).to_list(500)
+    scenes = await db.scenes.find({"project_id": project_id}).sort("scene_number", 1).to_list(500)
     if not script:
         raise HTTPException(status_code=400, detail="Generate a script before metadata")
-    data = await gen.generate_metadata(project, script["full_script"], scenes)
+    data = await gen.generate_metadata(project, script, scenes)
     doc = {
         "id": str(uuid.uuid4()),
         "project_id": project_id,
@@ -522,6 +612,24 @@ async def generate_metadata_endpoint(project_id: str, user=Depends(get_current_u
     await db.metadata_packages.replace_one({"project_id": project_id}, doc, upsert=True)
     await _log_cost(db, project_id, "metadata", tokens=600, cost=0.04)
     await db.projects.update_one({"id": project_id}, {"$set": {"estimated_cost": float(project.get("estimated_cost", 0)) + 0.04, "updated_at": _now()}})
+
+    # Auto-create thumbnail briefs
+    try:
+        concepts = await gen.generate_thumbnail_concepts(project, script)
+        await db.assets.delete_many({"project_id": project_id, "asset_type": "thumbnail_concept"})
+        for concept in concepts:
+            await db.assets.insert_one({
+                "id": __import__("uuid").uuid4().hex,
+                "project_id": project_id,
+                "asset_type": "thumbnail_concept",
+                "brief": concept,
+                "status": "pending",
+                "created_at": _now(),
+                "updated_at": _now(),
+            })
+    except Exception:
+        pass
+
     return await _attach_project_view(db, await db.projects.find_one({"id": project_id}, {"_id": 0}))
 
 
@@ -530,7 +638,8 @@ async def generate_thumbnails_endpoint(project_id: str, user=Depends(get_current
     db = get_db()
     project = await db.projects.find_one({"id": project_id}, {"_id": 0})
     _ensure_project_access(project, user, write=True)
-    concepts = await gen.generate_thumbnails(project)
+    script = await db.scripts.find_one({"project_id": project_id}, {"_id": 0}) or {}
+    concepts = await gen.generate_thumbnail_concepts(project, script)
     # Upsert as assets (type=thumbnail_concept)
     await db.assets.delete_many({"project_id": project_id, "asset_type": "thumbnail_concept"})
     for i, c in enumerate(concepts, start=1):
@@ -689,6 +798,55 @@ async def stock_meta(user=Depends(get_current_user)):
     return {"mock": stock_service.is_mock_mode()}
 
 
+@router.get("/stock/search")
+async def stock_search(
+    q: str = "",
+    source: str = "pexels",
+    type: str = "both",
+    per_page: int = 12,
+):
+    """Public stock search for scene picker — GET /api/stock/search?q=&source=pexels|pixabay|unsplash&type=video|image
+
+    Calls Pexels Video API (preferred), Pixabay Video API, or Unsplash API
+    depending on source param. Falls back to deterministic mock if provider
+    key missing or rate-limited. No auth required so scene picker can query
+    quickly; still respects mock mode when keys absent.
+
+    Query params:
+      q: search keywords
+      source: pexels|pixabay|unsplash (default pexels)
+      type: video|image|both (maps to videos/photos/both)
+      per_page: 1..40
+    """
+    query = (q or "").strip()
+    source = (source or "pexels").strip().lower()
+    if source not in ("pexels", "pixabay", "unsplash"):
+        source = "pexels"
+    # Map type param to internal MediaType
+    t = (type or "both").strip().lower()
+    if t in ("video", "videos"):
+        media_type = "videos"
+    elif t in ("image", "images", "photo", "photos"):
+        media_type = "photos"
+    else:
+        media_type = "both"
+    per_page = max(1, min(int(per_page), 40))
+    if not query:
+        query = "forest"
+    # Unsplash only supports images; force photos
+    if source == "unsplash" and media_type == "videos":
+        media_type = "photos"
+    try:
+        result = await stock_service.search_stock_with_source(query, source, media_type, per_page)
+        return result
+    except Exception as e:  # noqa: BLE001
+        logger = __import__("logging").getLogger("facelessforge.routes")
+        logger.warning("stock/search failed q=%r source=%s type=%s: %s", query[:60], source, media_type, e)
+        # Fallback to mock never fails
+        from .stock import _mock_results
+        return {"source": "mock", "results": _mock_results(query, media_type, per_page), "mock": True, "query": query, "warning": str(e)}
+
+
 @router.post("/projects/{project_id}/stock-search")
 async def project_stock_search(project_id: str, body: FindAssetsRequest, user=Depends(get_current_user)):
     """Ad-hoc stock search scoped to a project (no scene context)."""
@@ -710,19 +868,7 @@ async def find_scene_assets(project_id: str, scene_id: str, body: FindAssetsRequ
     if not scene:
         raise HTTPException(status_code=404, detail="Scene not found")
 
-    # Build the query: explicit body.query > scene.search_terms > visual_direction > project.topic
-    query_parts: list[str] = []
-    if body.query and body.query.strip():
-        query_parts.append(body.query.strip())
-    elif scene.get("search_terms"):
-        # Use first 2-3 terms as a single query
-        query_parts.append(" ".join(scene["search_terms"][:3]))
-    elif scene.get("visual_direction"):
-        query_parts.append(scene["visual_direction"][:80])
-    else:
-        query_parts.append(project.get("topic") or project.get("niche") or "stock")
-    query = " ".join(q for q in query_parts if q).strip()
-
+    query = _build_scene_stock_query(scene, project, body.query)
     return await stock_service.search_stock(query, body.media_type, body.per_page)
 
 
@@ -792,22 +938,9 @@ async def auto_attach_assets(project_id: str, body: AutoAttachRequest, user=Depe
     if user["role"] == "viewer":
         raise HTTPException(status_code=403, detail="Viewer cannot attach assets")
 
-    scenes = await db.scenes.find({"project_id": project_id}, {"_id": 0}).sort("scene_number", 1).to_list(500)
+    scenes = await db.scenes.find({"project_id": project_id}).sort("scene_number", 1).to_list(500)
     if not scenes:
         raise HTTPException(status_code=400, detail="Generate scenes before auto-attach.")
-
-    # ---- Derive (or load cached) project-wide visual tone ----
-    visual_tone = project.get("visual_tone") or ""
-    if not visual_tone:
-        from .visual_query import derive_visual_tone
-        script_doc = await db.scripts.find_one({"project_id": project_id}, {"_id": 0})
-        full_text = (script_doc or {}).get("full_script") or project.get("topic") or ""
-        if full_text:
-            visual_tone = await derive_visual_tone(full_text)
-            if visual_tone:
-                await db.projects.update_one(
-                    {"id": project_id}, {"$set": {"visual_tone": visual_tone}}
-                )
 
     total = len(scenes)
     attached = 0
@@ -816,7 +949,7 @@ async def auto_attach_assets(project_id: str, body: AutoAttachRequest, user=Depe
     details: list[dict] = []
 
     for scene in scenes:
-        scene_id = scene["id"]
+        scene_id = str(scene.get("id") or scene.get("_id"))
         existing = await db.assets.find_one({
             "project_id": project_id,
             "scene_id": scene_id,
@@ -828,64 +961,135 @@ async def auto_attach_assets(project_id: str, body: AutoAttachRequest, user=Depe
             details.append({"scene_id": scene_id, "scene_number": scene["scene_number"], "status": "skipped", "reason": "already_has_stock"})
             continue
 
-        # Build query using shared helper (LLM search_terms → deterministic keywords → fallback)
-        from .visual_query import build_scene_query
-        query = build_scene_query(scene)
-
+        # v2.7 FIX: Generate 3 ordered queries per scene: pexels_video cinematic full, pixabay_video shorter core, unsplash_image shortest
+        # Preserve full Visual + cinematic suffix, retry with core 3-4 words then image fallback. Count image as attached via Ken Burns.
         try:
-            result = await stock_service.search_stock(
-                query, body.media_type, per_page=8,
-                visual_tone=visual_tone or None,
-            )
-            top = (result.get("results") or [None])[0]
-            if not top:
+            import logging
+            logger = logging.getLogger("facelessforge.routes")
+            ordered = _build_ordered_stock_queries(scene, project)
+            picked = []
+            picked_query = ""
+            picked_source = ""
+            picked_media_type = ""
+            # Respect body.media_type but allow fallback to image even if videos requested (image via Burns valid)
+            requested = (body.media_type or "both").strip().lower()
+            if requested not in ("both", "videos", "photos"):
+                requested = "both"
+            for qobj in ordered:
+                q = qobj["query"]
+                src = qobj["source"]
+                mt = qobj["media_type"]  # videos or photos
+                # If client requested videos only, still allow final image fallback (unsplash) after video attempts fail
+                # If client requested photos only, skip video sources
+                if requested == "photos" and mt == "videos":
+                    continue
+                # If requested videos, allow photos only as last-resort fallback (unsplash image)
+                if requested == "videos" and src == "unsplash" and mt == "photos":
+                    pass
+                elif requested == "videos" and mt == "photos" and src != "unsplash":
+                    continue
+                try:
+                    result = await stock_service.search_stock_with_source(q, src, mt, per_page=12)
+                    results = result.get("results") or []
+                except Exception as e:
+                    logger.warning("auto-attach scene %s: source=%s query='%s' error=%s", scene["scene_number"], src, q[:80], e)
+                    results = []
+                    try:
+                        result = await stock_service.search_stock(q, mt, per_page=12)
+                        results = result.get("results") or []
+                    except Exception:
+                        results = []
+                logger.info("auto-attach scene %s: stock search source=%s type=%s query='%s' -> %d results", scene["scene_number"], src, mt, q[:100], len(results))
+                if results:
+                    if mt == "videos":
+                        video_results = [r for r in results if r.get("media_type") == "stock_video" and r.get("download_url")]
+                        if video_results:
+                            picked = video_results[:3]
+                        else:
+                            continue
+                    else:
+                        image_results = [r for r in results if r.get("media_type") == "stock_image"]
+                        if image_results:
+                            picked = image_results[:3]
+                        else:
+                            picked = results[:3]
+                    if picked:
+                        picked_query = q
+                        picked_source = src
+                        picked_media_type = mt
+                        break
+            if not picked:
                 failed += 1
-                details.append({"scene_id": scene_id, "scene_number": scene["scene_number"], "status": "failed", "reason": "no_results"})
+                details.append({"scene_id": scene_id, "scene_number": scene["scene_number"], "status": "failed", "reason": "no_stock_results"})
                 continue
+            if picked and picked[0].get("media_type") == "stock_image":
+                logger.info("auto-attach scene %s: fallback to image kind=image (Ken Burns) source=%s query='%s'", scene["scene_number"], picked_source, picked_query[:80])
+            else:
+                logger.info("auto-attach scene %s: selected video source=%s query='%s'", scene["scene_number"], picked_source, picked_query[:80])
 
-            # If replacing, remove prior stock assets for this scene first
             if existing and body.replace_existing:
                 await db.assets.delete_many({
                     "project_id": project_id,
                     "scene_id": scene_id,
                     "asset_type": {"$in": ["stock_video", "stock_image"]},
                 })
+                picked = picked[:1]
+            elif existing:
+                existing_count = await db.assets.count_documents({
+                    "project_id": project_id,
+                    "scene_id": scene_id,
+                    "asset_type": {"$in": ["stock_video", "stock_image"]},
+                })
+                if existing_count >= 3:
+                    skipped += 1
+                    details.append({"scene_id": scene_id, "scene_number": scene["scene_number"], "status": "skipped", "reason": "already_has_stock"})
+                    continue
+                if existing_count > 0:
+                    picked = picked[:1]
+                else:
+                    picked = picked[:1]
+            else:
+                picked = picked[:1]
 
-            doc = {
-                "id": str(uuid.uuid4()),
-                "project_id": project_id,
-                "scene_id": scene_id,
-                "name": top["title"],
-                "asset_type": top["media_type"],
-                "file_path": None,
-                "source": top["source"],
-                "external_id": top["external_id"],
-                "preview_url": top.get("preview_url"),
-                "source_url": top.get("source_url"),
-                "download_url": top.get("download_url"),
-                "attribution_name": top.get("attribution_name"),
-                "attribution_url": top.get("attribution_url"),
-                "width": top.get("width"),
-                "height": top.get("height"),
-                "duration": top.get("duration"),
-                "tags": top.get("tags") or [],
-                "query": query,
-                "status": "attached",
-                "created_at": _now(),
-                "updated_at": _now(),
-            }
-            try:
-                await db.assets.insert_one(doc)
-                attached += 1
-                details.append({"scene_id": scene_id, "scene_number": scene["scene_number"], "status": "attached", "asset_id": doc["id"]})
-            except Exception:  # DuplicateKeyError from compound unique index
-                # Treat as skipped — another actor already attached the same item
-                skipped += 1
-                details.append({"scene_id": scene_id, "scene_number": scene["scene_number"], "status": "skipped", "reason": "duplicate"})
-        except Exception as e:  # noqa: BLE001
+            for top in picked:
+                doc = {
+                    "id": str(uuid.uuid4()),
+                    "project_id": project_id,
+                    "scene_id": scene_id,
+                    "name": top["title"],
+                    "asset_type": top["media_type"],
+                    "file_path": None,
+                    "source": top["source"],
+                    "external_id": top["external_id"],
+                    "preview_url": top.get("preview_url"),
+                    "source_url": top.get("source_url"),
+                    "download_url": top.get("download_url"),
+                    "attribution_name": top.get("attribution_name"),
+                    "attribution_url": top.get("attribution_url"),
+                    "width": top.get("width"),
+                    "height": top.get("height"),
+                    "duration": top.get("duration"),
+                    "tags": top.get("tags") or [],
+                    "query": picked_query,
+                    "status": "attached",
+                    "created_at": _now(),
+                    "updated_at": _now(),
+                }
+                try:
+                    await db.assets.insert_one(doc)
+                    attached += 1
+                    details.append({"scene_id": scene_id, "scene_number": scene["scene_number"], "status": "attached", "asset_id": doc["id"]})
+                except Exception as insert_err:
+                    skipped += 1
+                    details.append({"scene_id": scene_id, "scene_number": scene["scene_number"], "status": "skipped", "reason": "duplicate"})
+        except Exception as e:
             failed += 1
             details.append({"scene_id": scene_id, "scene_number": scene["scene_number"], "status": "failed", "reason": str(e)[:120]})
 
+    # Required journalctl log for spec: [ATTACH] 18 attached 0 failed
+    import logging as _logging
+    _logging.getLogger("facelessforge.routes").info("[ATTACH] %s attached %s failed project=%s mock=%s", attached, failed, project_id, stock_service.is_mock_mode())
+    print(f"[ATTACH] {attached} attached {failed} failed project={project_id}", flush=True)
     return {
         "total": total,
         "attached": attached,
@@ -1014,18 +1218,31 @@ async def tts_meta(user=Depends(get_current_user)):
 
 
 def _voice_style_for(project: dict, override: Optional[str]) -> str:
-    """Map a free-form project.voice_style ("neutral male narrator") to a tts key."""
-    if override and override in tts_service.VOICE_STYLE_MAP:
+    """Resolve a narrator preset ("NEUTRAL_FEMALE_NARRATOR") or style word ("calm").
+
+    Preset/override strings are passed through untouched so tts.py resolves the
+    ElevenLabs voice ID; free-form project.voice_style labels are normalized to
+    a preset or style word so a female selection actually gets a female voice.
+    """
+    if override:
         return override
-    raw = (project.get("voice_style") or "").lower()
+    raw = (project.get("voice_style") or "").strip()
+    if not raw:
+        return os.environ.get("DEFAULT_VOICE_STYLE", "narrator")
+    preset = tts_service._normalize_preset(raw)
+    if preset in tts_service.VOICE_MAP:
+        return preset
+    low = raw.lower()
     for key in tts_service.VOICE_STYLE_MAP.keys():
-        if key in raw:
+        if key in low:
             return key
-    if "male" in raw or "narrator" in raw or "deep" in raw:
-        return "narrator"
-    if "upbeat" in raw or "energy" in raw or "fast" in raw:
+    if "female" in low:
+        return "NEUTRAL_FEMALE_NARRATOR"
+    if "male" in low or "deep" in low or "narrator" in low:
+        return "NEUTRAL_MALE_NARRATOR"
+    if "upbeat" in low or "energy" in low or "fast" in low:
         return "energetic"
-    if "doc" in raw or "neutral" in raw:
+    if "doc" in low or "neutral" in low:
         return "documentary"
     return os.environ.get("DEFAULT_VOICE_STYLE", "narrator")
 
@@ -1051,7 +1268,7 @@ async def generate_full_voiceover(
     asset_id = str(uuid.uuid4())
     try:
         payload = await tts_service.generate_voiceover(
-            text=text, voice_style=voice, project_id=project_id,
+            text=text, voice_style=voice, tone=body.tone, project_id=project_id,
             asset_id=asset_id, scene_id=None, name_suffix="(Full script)",
         )
     except ValueError as e:
@@ -1062,15 +1279,27 @@ async def generate_full_voiceover(
     payload["text_excerpt"] = text[:240]
     payload["created_at"] = _now()
     payload["updated_at"] = _now()
+    # Auto-select: mirror the thumbnail auto-chain so render preflight passes
+    # immediately after generation. Any previously selected full-script voiceover
+    # is demoted to keep the per-project exclusivity invariant.
+    payload["status"] = "selected"
+    await db.assets.update_many(
+        {
+            "project_id": project_id,
+            "asset_type": "voiceover_audio",
+            "scene_id": None,
+            "status": "selected",
+        },
+        {"$set": {"status": "generated", "updated_at": _now()}},
+    )
     await db.assets.insert_one(dict(payload))
+    project_set = {"selected_voiceover_asset_id": asset_id, "updated_at": _now()}
 
     if not payload.get("mock"):
         cost = float(payload.get("cost_estimate") or 0)
         if cost:
-            await db.projects.update_one(
-                {"id": project_id},
-                {"$set": {"estimated_cost": float(project.get("estimated_cost", 0)) + cost, "updated_at": _now()}},
-            )
+            project_set["estimated_cost"] = float(project.get("estimated_cost", 0)) + cost
+    await db.projects.update_one({"id": project_id}, {"$set": project_set})
     return await _attach_project_view(db, await db.projects.find_one({"id": project_id}, {"_id": 0}))
 
 
@@ -1097,7 +1326,7 @@ async def generate_scene_voiceover(
     asset_id = str(uuid.uuid4())
     try:
         payload = await tts_service.generate_voiceover(
-            text=text, voice_style=voice, project_id=project_id,
+            text=text, voice_style=voice, tone=body.tone, project_id=project_id,
             asset_id=asset_id, scene_id=scene_id,
             name_suffix=f"(Scene {scene.get('scene_number', '?'):02d})" if isinstance(scene.get('scene_number'), int) else "(Scene)",
         )
@@ -1244,7 +1473,7 @@ async def render_preflight(project_id: str, user=Depends(get_current_user)):
     project = await db.projects.find_one({"id": project_id}, {"_id": 0})
     _ensure_project_access(project, user)
     script = await db.scripts.find_one({"project_id": project_id}, {"_id": 0})
-    scenes = await db.scenes.find({"project_id": project_id}, {"_id": 0}).sort("scene_number", 1).to_list(500)
+    scenes = await db.scenes.find({"project_id": project_id}).sort("scene_number", 1).to_list(500)
     metadata = await db.metadata_packages.find_one({"project_id": project_id}, {"_id": 0})
     assets = await db.assets.find({"project_id": project_id}, {"_id": 0}).to_list(500)
     return render_service.validate_prerequisites(project, script, scenes, metadata, assets)
@@ -1259,9 +1488,22 @@ async def render_start(project_id: str,
     _ensure_project_access(project, user, write=True)
     if user["role"] == "viewer":
         raise HTTPException(status_code=403, detail="Viewer cannot start renders")
+    body = body or RenderStartRequest()
+    # Voice selector moved from /generate-script to /render payload — allow last-minute voice change
+    # DB: voice_id now lives on projects table (not just scripts)
+    if body.voice_id or body.voice_style:
+        update_fields = {"updated_at": _now()}
+        if body.voice_style:
+            update_fields["voice_style"] = body.voice_style
+        if body.voice_id:
+            update_fields["voice_id"] = body.voice_id
+            # normalize voice_id to voice_style for TTS resolver
+            update_fields["voice_style"] = body.voice_id
+        await db.projects.update_one({"id": project_id}, {"$set": update_fields})
+        project = await db.projects.find_one({"id": project_id}, {"_id": 0})
     # Validate prereqs first so caller gets a clean 400 before queuing
     script = await db.scripts.find_one({"project_id": project_id}, {"_id": 0})
-    scenes = await db.scenes.find({"project_id": project_id}, {"_id": 0}).sort("scene_number", 1).to_list(500)
+    scenes = await db.scenes.find({"project_id": project_id}).sort("scene_number", 1).to_list(500)
     metadata = await db.metadata_packages.find_one({"project_id": project_id}, {"_id": 0})
     assets = await db.assets.find({"project_id": project_id}, {"_id": 0}).to_list(500)
     check = render_service.validate_prerequisites(project, script, scenes, metadata, assets)
@@ -1319,11 +1561,15 @@ from .storage import storage_status as storage_status_fn
 
 
 def _provider_modes() -> dict:
+    ollama_ready = bool(os.environ.get("OLLAMA_MODEL", "").strip())
+    claude_ready = bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
     return {
         "llm_text": {
-            "mode": "live" if os.environ.get("EMERGENT_LLM_KEY") else "fallback",
-            "model": os.environ.get("LLM_MODEL", "gpt-5.2"),
-            "provider": os.environ.get("LLM_PROVIDER", "openai"),
+            "mode": "live" if (ollama_ready or claude_ready) else "fallback",
+            "provider": "ollama" if ollama_ready else ("anthropic" if claude_ready else "none"),
+            "model": os.environ.get("OLLAMA_MODEL") or os.environ.get("LLM_MODEL", "claude-3-5-sonnet-20241022"),
+            "ollama_ready": ollama_ready,
+            "claude_ready": claude_ready,
         },
         "thumbnail_image": {
             "mode": "mock" if thumb_images.is_mock_mode() else "live",
@@ -1428,7 +1674,7 @@ async def export_scenes_csv(project_id: str, user=Depends(get_current_user)):
     db = get_db()
     project = await db.projects.find_one({"id": project_id}, {"_id": 0})
     _ensure_project_access(project, user)
-    scenes = await db.scenes.find({"project_id": project_id}, {"_id": 0}).sort("scene_number", 1).to_list(500)
+    scenes = await db.scenes.find({"project_id": project_id}).sort("scene_number", 1).to_list(500)
     csv = scenes_to_csv(scenes)
     return PlainTextResponse(csv, media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="{project_id}-scenes.csv"'})
 
@@ -1450,7 +1696,7 @@ async def export_package_zip(project_id: str, user=Depends(get_current_user)):
     project = await db.projects.find_one({"id": project_id}, {"_id": 0})
     _ensure_project_access(project, user)
     script = await db.scripts.find_one({"project_id": project_id}, {"_id": 0})
-    scenes = await db.scenes.find({"project_id": project_id}, {"_id": 0}).sort("scene_number", 1).to_list(500)
+    scenes = await db.scenes.find({"project_id": project_id}).sort("scene_number", 1).to_list(500)
     metadata = await db.metadata_packages.find_one({"project_id": project_id}, {"_id": 0})
     assets = await db.assets.find({"project_id": project_id}, {"_id": 0}).to_list(500)
 
@@ -1577,7 +1823,7 @@ async def get_settings(user=Depends(get_current_user)):
             "default_tone": "calm-authoritative",
             "default_visual_style": "cinematic b-roll",
             "cost_limit_monthly": 50.0,
-            "preferred_provider": "openai/gpt-5.2",
+            "preferred_provider": "deepseek/deepseek-chat",
             "created_at": _now(),
             "updated_at": _now(),
         }

@@ -45,6 +45,7 @@ import os
 from typing import Literal, Optional
 
 import httpx
+import requests  # requests-compatible via httpx; key used via params={'key': key}
 
 logger = logging.getLogger("facelessforge.stock")
 
@@ -291,6 +292,201 @@ async def _search_pexels(
 
     return out
 
+# ── Pixabay adapters ─────────────────────────────────────────────────────
+
+def _normalise_pixabay_image(hit: dict, query: str) -> dict:
+    return {
+        "source": "pixabay",
+        "external_id": str(hit.get("id")),
+        "media_type": "stock_image",
+        "title": (hit.get("tags") or f"Pixabay photo {hit.get('id')}")[:160],
+        "preview_url": hit.get("webformatURL") or hit.get("previewURL") or hit.get("largeImageURL"),
+        "source_url": hit.get("pageURL") or f"https://pixabay.com/photos/{hit.get('id')}/",
+        "download_url": hit.get("largeImageURL") or hit.get("webformatURL") or hit.get("previewURL"),
+        "attribution_name": hit.get("user") or "Pixabay contributor",
+        "attribution_url": f"https://pixabay.com/users/{hit.get('user')}-" + str(hit.get("user_id") or ""),
+        "width": int(hit.get("imageWidth") or hit.get("webformatWidth") or 0),
+        "height": int(hit.get("imageHeight") or hit.get("webformatHeight") or 0),
+        "duration": None,
+        "tags": [query] + (hit.get("tags") or "").split(", ")[:3],
+        "query": query,
+    }
+
+def _normalise_pixabay_video(hit: dict, query: str) -> Optional[dict]:
+    # Pixabay video hit contains videos.{large,medium,small,tiny}
+    videos = hit.get("videos") or {}
+    # Prefer large -> medium -> small
+    best = None
+    for size in ["large", "medium", "small", "tiny"]:
+        v = videos.get(size)
+        if v and v.get("url"):
+            best = v
+            break
+    if not best:
+        return None
+    width = int(best.get("width") or 0)
+    height = int(best.get("height") or 0)
+    if height >= width:
+        return None
+    if width < MIN_VIDEO_WIDTH:
+        return None
+    return {
+        "source": "pixabay",
+        "external_id": str(hit.get("id")),
+        "media_type": "stock_video",
+        "title": (hit.get("tags") or f"Pixabay video {hit.get('id')}")[:160],
+        "preview_url": hit.get("userImageURL") or best.get("url"),
+        "source_url": hit.get("pageURL") or f"https://pixabay.com/videos/{hit.get('id')}/",
+        "download_url": best.get("url"),
+        "attribution_name": hit.get("user") or "Pixabay contributor",
+        "attribution_url": f"https://pixabay.com/users/{hit.get('user')}-" + str(hit.get("user_id") or ""),
+        "width": width,
+        "height": height,
+        "duration": int(hit.get("duration") or best.get("duration") or 0) if hit.get("duration") or best.get("duration") else None,
+        "tags": [query] + (hit.get("tags") or "").split(", ")[:3],
+        "query": query,
+    }
+
+async def _search_pixabay(query: str, media_type: MediaType, per_page: int) -> list[dict]:
+    key = os.environ.get("PIXABAY_API_KEY", "").strip()
+    if not key:
+        logger.info("Pixabay search skipped: no API key")
+        raise RuntimeError("pixabay_no_key")
+    per_page = max(1, min(int(per_page), 40))
+    out: list[dict] = []
+    timeout = httpx.Timeout(10.0, connect=5.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        if media_type in ("both", "photos"):
+            params = {"key": key, "q": query, "image_type": "photo", "per_page": per_page, "safesearch": "true", "orientation": "horizontal"}
+            r = await client.get("https://pixabay.com/api/", params=params)
+            if r.status_code == 401:
+                logger.warning("Pixabay photos auth failed (401) query=%r — mock fallback", query[:60])
+                raise RuntimeError("pixabay_rate_limited")
+            if r.status_code == 429:
+                logger.warning("Pixabay photos rate-limited (429) query=%r — mock fallback", query[:60])
+                raise RuntimeError("pixabay_rate_limited")
+            r.raise_for_status()
+            data = r.json()
+            for hit in (data.get("hits") or [])[:per_page]:
+                out.append(_normalise_pixabay_image(hit, query))
+        if media_type in ("both", "videos"):
+            # Over-fetch to ensure 12 landscape results after filtering (portrait filtered)
+            fetch_n = max(per_page * 2, per_page + 10)
+            fetch_n = min(fetch_n, 40)
+            params = {"key": key, "q": query, "per_page": fetch_n, "safesearch": "true"}
+            r = await client.get("https://pixabay.com/api/videos/", params=params)
+            if r.status_code == 401:
+                logger.warning("Pixabay videos auth failed (401) query=%r — mock fallback", query[:60])
+                raise RuntimeError("pixabay_rate_limited")
+            if r.status_code == 429:
+                logger.warning("Pixabay videos rate-limited (429) query=%r — mock fallback", query[:60])
+                raise RuntimeError("pixabay_rate_limited")
+            r.raise_for_status()
+            data = r.json()
+            # Filter portrait etc., then slice to requested per_page to guarantee 12 when possible
+            valid = []
+            for hit in (data.get("hits") or []):
+                norm = _normalise_pixabay_video(hit, query)
+                if norm:
+                    valid.append(norm)
+                if len(valid) >= per_page:
+                    break
+            out.extend(valid[:per_page])
+    return out
+
+# ── Unsplash adapters ────────────────────────────────────────────────────
+
+def _normalise_unsplash_photo(p: dict, query: str) -> dict:
+    urls = p.get("urls") or {}
+    user = p.get("user") or {}
+    return {
+        "source": "unsplash",
+        "external_id": str(p.get("id")),
+        "media_type": "stock_image",
+        "title": (p.get("alt_description") or p.get("description") or f"Unsplash photo {p.get('id')}")[:160],
+        "preview_url": urls.get("small") or urls.get("thumb") or urls.get("regular"),
+        "source_url": p.get("links", {}).get("html") or f"https://unsplash.com/photos/{p.get('id')}",
+        "download_url": urls.get("regular") or urls.get("full") or urls.get("small"),
+        "attribution_name": user.get("name") or "Unsplash contributor",
+        "attribution_url": user.get("links", {}).get("html") or "https://unsplash.com",
+        "width": int(p.get("width") or 0),
+        "height": int(p.get("height") or 0),
+        "duration": None,
+        "tags": [query],
+        "query": query,
+    }
+
+async def _search_unsplash(query: str, per_page: int) -> list[dict]:
+    key = os.environ.get("UNSPLASH_ACCESS_KEY", "").strip()
+    if not key:
+        logger.info("Unsplash search skipped: no API key")
+        raise RuntimeError("unsplash_no_key")
+    per_page = max(1, min(int(per_page), 30))
+    headers = {"Authorization": f"Client-ID {key}"}
+    timeout = httpx.Timeout(10.0, connect=5.0)
+    async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
+        params = {"query": query, "per_page": per_page, "orientation": "landscape"}
+        r = await client.get("https://api.unsplash.com/search/photos", params=params)
+        if r.status_code == 429:
+            raise RuntimeError("unsplash_rate_limited")
+        r.raise_for_status()
+        data = r.json()
+        out = []
+        for p in (data.get("results") or [])[:per_page]:
+            out.append(_normalise_unsplash_photo(p, query))
+        return out
+
+# ── Unified dispatcher ────────────────────────────────────────────────────
+
+async def search_stock_with_source(query: str, source: str, media_type: MediaType, per_page: int = 12) -> dict:
+    """Dispatch to correct provider based on source param.
+
+    source: pexels|pixabay|unsplash (case-insensitive). Default pexels.
+    media_type: both|videos|photos derived from type param.
+    Falls back to mock if provider key missing or rate-limited.
+    """
+    query = (query or "").strip()
+    source = (source or "pexels").strip().lower()
+    if not query:
+        return {"source": source if source in ("pexels","pixabay","unsplash") else "mock", "results": [], "mock": True, "query": ""}
+    # Normalize media_type
+    if media_type not in ("both", "videos", "photos"):
+        media_type = "both"
+    # Unsplash only supports images
+    if source == "unsplash" and media_type == "videos":
+        media_type = "photos"
+    try:
+        if source == "pixabay":
+            results = await _search_pixabay(query, media_type, per_page)
+            query_terms = [t.lower() for t in query.split() if len(t) > 2]
+            if query_terms:
+                results.sort(key=lambda c: score_relevance(c, query_terms), reverse=True)
+            return {"source": "pixabay", "results": results, "mock": False, "query": query}
+        elif source == "unsplash":
+            results = await _search_unsplash(query, per_page)
+            query_terms = [t.lower() for t in query.split() if len(t) > 2]
+            if query_terms:
+                results.sort(key=lambda c: score_relevance(c, query_terms), reverse=True)
+            return {"source": "unsplash", "results": results, "mock": False, "query": query}
+        else:  # pexels default
+            # Use existing search_stock path which handles mock fallback internally
+            res = await search_stock(query, media_type, per_page)
+            # Override source to pexels if not mock
+            if not res.get("mock"):
+                res["source"] = "pexels"
+            return res
+    except RuntimeError as e:
+        msg = str(e)
+        if msg in ("pixabay_no_key", "unsplash_no_key"):
+            logger.info("%s no key, falling back to mock for query=%r", source, query[:60])
+            return {"source": "mock", "results": _mock_results(query, media_type, per_page), "mock": True, "query": query, "warning": f"{source} API key missing — mock results"}
+        if "rate_limited" in msg:
+            logger.warning("%s rate-limited, mock fallback query=%r", source, query[:60])
+            return {"source": "mock", "results": _mock_results(query, media_type, per_page), "mock": True, "query": query, "warning": f"{source} rate limit — mock results"}
+        raise
+    except httpx.HTTPError as e:
+        logger.warning("%s HTTP error %s — mock fallback", source, e)
+        return {"source": "mock", "results": _mock_results(query, media_type, per_page), "mock": True, "query": query, "warning": f"{source} unavailable — mock results"}
 
 # ── Public ──────────────────────────────────────────────────────────────────
 
