@@ -13,6 +13,24 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
+# OpenTelemetry -> Cloud Trace (Gennyvid) - must be before FastAPI
+try:
+    from opentelemetry import trace
+    from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+    exporter = CloudTraceSpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(BatchSpanProcessor(exporter))
+    trace.set_tracer_provider(provider)
+    _OTEL_ENABLED = True
+except Exception as _otel_e:
+    _OTEL_ENABLED = False
+    # no crash if otel deps missing
+    pass
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
@@ -59,11 +77,20 @@ async def lifespan(app: FastAPI):
     close_db()
 
 app = FastAPI(title="FacelessForge API", lifespan=lifespan)
+try:
+    if '_OTEL_ENABLED' in globals() and _OTEL_ENABLED:
+        FastAPIInstrumentor.instrument_app(app)
+        HTTPXClientInstrumentor().instrument()
+except: pass
 
 # ── STATIC MOUNT - MUST BE BEFORE GET ROUTES (fix blank /app) ──
 FRONTEND_BUILD = _Path("/opt/facelessforge/deploy/frontend/build")
 if FRONTEND_BUILD.exists() and (FRONTEND_BUILD / "static").exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_BUILD / "static")), name="frontend_static")
+
+@app.get("/healthz")
+async def healthz():
+    return {"ok": True, "service": "facelessforge", "healthz": True}
 
 @app.get("/api/health")
 async def health():
