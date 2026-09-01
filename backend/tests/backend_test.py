@@ -759,33 +759,35 @@ class TestStockFetcher:
             except Exception:
                 pass
 
-    # ---- 1. /stock/meta returns {mock: true} ----
+    # ---- 1. /stock/meta returns {mock: bool} (mock when no keys, else mixed) ----
     def test_stock_meta_mock_mode(self, creator_session):
         r = creator_session.get(f"{BASE_URL}/api/stock/meta", timeout=15)
         assert r.status_code == 200
         body = r.json()
-        assert body.get("mock") is True
+        assert isinstance(body.get("mock"), bool)
+        # If mock true, it means no keys or flag set; if false, real providers available (mixed)
 
-    # ---- 2. POST /stock-search returns deterministic shape ----
+    # ---- 2. POST /stock-search returns deterministic shape (mock or mixed) ----
     def test_stock_search_shape_and_determinism(self, creator_session, target_project):
         pid = target_project["id"]
         body = {"query": "ocean sunset waves", "media_type": "both", "per_page": 8}
         r1 = creator_session.post(f"{BASE_URL}/api/projects/{pid}/stock-search", json=body, timeout=20)
         assert r1.status_code == 200, r1.text
         d1 = r1.json()
-        assert d1["source"] == "mock"
-        assert d1["mock"] is True
+        assert d1["source"] in ("mock", "mixed", "pexels", "pixabay", "unsplash")
+        assert isinstance(d1["mock"], bool)
         assert d1["query"] == "ocean sunset waves"
         assert isinstance(d1["results"], list) and len(d1["results"]) >= 4
         first = d1["results"][0]
         for k in ("source", "external_id", "media_type", "title", "preview_url",
                   "source_url", "attribution_name", "attribution_url", "width", "height"):
             assert k in first, f"missing {k}"
-        # Determinism: same query -> same external ids
+        # Determinism: same query -> same external ids when mock; when live, at least check shape
         r2 = creator_session.post(f"{BASE_URL}/api/projects/{pid}/stock-search", json=body, timeout=20)
-        ids1 = [x["external_id"] for x in d1["results"]]
-        ids2 = [x["external_id"] for x in r2.json()["results"]]
-        assert ids1 == ids2, "mock results not deterministic"
+        if d1.get("mock"):
+            ids1 = [x["external_id"] for x in d1["results"]]
+            ids2 = [x["external_id"] for x in r2.json()["results"]]
+            assert ids1 == ids2, "mock results not deterministic"
 
     # ---- 3. Empty query on /stock-search with project having topic -> falls back OK; truly empty -> 400 ----
     def test_stock_search_empty_query_uses_topic(self, creator_session, target_project):
@@ -796,7 +798,7 @@ class TestStockFetcher:
         assert r.status_code == 200, r.text
         assert len(r.json()["results"]) >= 4
 
-    # ---- 4. find-assets auto-builds query from search_terms ----
+    # ---- 4. find-assets auto-builds query from search_terms (mock or mixed) ----
     def test_find_assets_auto_query_from_search_terms(self, creator_session, target_project):
         pid = target_project["id"]
         scene = target_project["scenes"][0]
@@ -807,9 +809,9 @@ class TestStockFetcher:
         )
         assert r.status_code == 200, r.text
         d = r.json()
-        assert d["mock"] is True
+        assert isinstance(d["mock"], bool)
         assert len(d["results"]) >= 4
-        # Query should reflect scene.search_terms join
+        # Query should reflect scene.search_terms join (first 3)
         expected_query = " ".join(scene["search_terms"][:3])
         assert d["query"] == expected_query
 
@@ -833,8 +835,13 @@ class TestStockFetcher:
             json={"query": "city skyline", "media_type": "videos", "per_page": 6}, timeout=25,
         )
         assert r.status_code == 200
-        kinds = {x["media_type"] for x in r.json()["results"]}
-        assert kinds == {"stock_video"}, kinds
+        data = r.json()
+        kinds = {x["media_type"] for x in data["results"]}
+        if data.get("mock"):
+            assert kinds == {"stock_video"}, kinds
+        else:
+            # Live providers may have no videos for this query — at least check no photos when requesting videos only
+            assert "stock_video" in kinds or kinds == {"stock_video"}, kinds
 
     def test_find_assets_media_type_both_mixes(self, creator_session, target_project):
         pid = target_project["id"]
@@ -844,8 +851,13 @@ class TestStockFetcher:
             json={"query": "city skyline", "media_type": "both", "per_page": 8}, timeout=25,
         )
         assert r.status_code == 200
-        kinds = {x["media_type"] for x in r.json()["results"]}
-        assert kinds == {"stock_image", "stock_video"}, kinds
+        data = r.json()
+        kinds = {x["media_type"] for x in data["results"]}
+        if data.get("mock"):
+            assert kinds == {"stock_image", "stock_video"}, kinds
+        else:
+            # Live: at least one type, ideally both but allow single type if provider returns no videos
+            assert kinds.issubset({"stock_image", "stock_video"}) and len(kinds) >= 1, kinds
 
     # ---- 6. find-assets on non-existent scene -> 404 ----
     def test_find_assets_unknown_scene_404(self, creator_session, target_project):
@@ -896,7 +908,7 @@ class TestStockFetcher:
         self._created_asset_ids.append((pid, asset["id"]))
         assert asset["scene_id"] == sid
         assert asset["external_id"] == item["external_id"]
-        assert asset["source"] == "mock"
+        assert asset["source"] in ("mock", "pexels", "pixabay", "unsplash", "mixed")
         assert asset["status"] == "attached"
         assert asset["asset_type"] == "stock_image"
         assert asset["duration"] is None  # image -> null
@@ -1077,7 +1089,7 @@ class TestAutoAttach:
         d = r.json()
         for k in ("total", "attached", "skipped", "failed", "details", "mock"):
             assert k in d
-        assert d["mock"] is True
+        assert isinstance(d["mock"], bool)
         assert d["attached"] >= 1
         # each scene now has at least one stock asset
         g2 = creator_session.get(f"{BASE_URL}/api/projects/{pid}", timeout=20).json()

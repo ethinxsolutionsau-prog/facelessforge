@@ -26,6 +26,22 @@ def close_db():
 
 async def ensure_indexes():
     db = get_db()
+    # Forge auto-post collections
+    try:
+        await db.forge_runs.create_index("created_at")
+        await db.forge_runs.create_index("project_id")
+        await db.forge_runs.create_index("id", unique=True, sparse=True)
+        await db.niches.create_index("name", unique=True)
+        await db.youtube_tokens.create_index("id", unique=True)
+        # seed niches if empty
+        if await db.niches.count_documents({}) == 0:
+            import uuid
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            for _n in ["AI side hustles", "Faceless automation"]:
+                await db.niches.update_one({"name": _n}, {"$setOnInsert": {"id": str(uuid.uuid4()), "name": _n, "created_at": now}}, upsert=True)
+    except Exception:
+        pass
     await db.users.create_index("email", unique=True)
     await db.users.create_index("id", unique=True)
     await db.projects.create_index("id", unique=True)

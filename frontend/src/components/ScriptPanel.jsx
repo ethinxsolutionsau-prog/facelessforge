@@ -38,7 +38,7 @@ export default function ScriptPanel({ projectId, script, canEdit, onChange }) {
 
   const generate = async () => {
     setGenerating(true);
-    toast.loading("Generating script with GPT-5.2…", { id: "gen-script" });
+    toast.loading("Generating with DeepSeek…", { id: "gen-script" });
     try {
       const { data } = await api.post(`/projects/${projectId}/generate-script`);
       onChange(data);

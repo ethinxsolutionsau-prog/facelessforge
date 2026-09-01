@@ -23,7 +23,7 @@ export default function JobHistory({ jobs }) {
               {j.status}
             </span>
             <span className="font-mono text-[10px] text-zinc-500">
-              {new Date(j.created_at).toLocaleString()}
+              {new Date(j.created_at).toLocaleString('en-AU', {timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, hour12:true})}
             </span>
             <span className="flex-1" />
             {j.output_url && (

@@ -27,7 +27,7 @@ export default function TopBar({ title, subtitle, right }) {
   return (
     <header
       data-testid="topbar"
-      className="sticky top-0 z-30 h-16 border-b border-zinc-800 bg-[#0A0A0A]/90 backdrop-blur-xl flex items-center justify-between px-8"
+      className="sticky top-0 z-30 h-16 border-b border-[rgba(59,130,246,0.15)] bg-[#0f141f]/90 backdrop-blur-xl flex items-center justify-between px-8 pl-14 md:pl-8"
     >
       <div>
         <div className="flex items-center gap-3">

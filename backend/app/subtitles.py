@@ -12,17 +12,42 @@ from pathlib import Path
 # ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
 # CONSTITUTION §5 TEXT ON SCREEN — ffmpeg subtitle filter style string.
+# FIX: Captions spec - Arial-Bold 60 white black stroke 3, y=70% centered max-width 1000px
 # This is consumed by the render pipeline (render.py) when burning captions.
 FFMPEG_SUBTITLE_STYLE = (
-    "FontName=DejaVu Sans,"
-    "FontSize=15,"
-    "Bold=0,"
+    "FontName=Arial,"
+    "FontSize=60,"
+    "Bold=1,"
     "Alignment=2,"
-    "MarginV=45,"
-    "BorderStyle=3,"
-    "OutlineColour=&H90000000,"
-    "PrimaryColour=&H00FFFFFF"
+    "MarginL=460,"
+    "MarginR=460,"
+    "MarginV=280,"
+    "BorderStyle=1,"
+    "OutlineColour=&H00000000,"
+    "PrimaryColour=&H00FFFFFF,"
+    "Outline=3,"
+    "Shadow=0"
 )
+
+ASS_KARAOKE_STYLE = (
+    "Style: Default,Arial,60,16777215,16777215,0,0,-1,0,0,0,100,100,0,0,1,3,0,2,460,460,280,1\n"
+    "Style: Karaoke,Arial,60,16777215,16777215,0,0,-1,0,0,0,100,100,0,0,1,3,0,2,460,460,280,1"
+)
+
+ASS_HEADER = """[Script Info]
+Title: FacelessForge Karaoke
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+WrapStyle: 2
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,60,16777215,16777215,0,0,-1,0,0,0,100,100,0,0,1,3,0,2,460,460,280,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
 
 # Tighter caption defaults per the Quality Constitution.
 DEFAULT_WORDS_PER_CUE = 7        # CONSTITUTION §5: 6-8 word chunks
@@ -268,4 +293,101 @@ def write_srt_from_text(
         ),
         encoding="utf-8",
     )
+    return out_path
+
+
+def _ass_ts(seconds: float) -> str:
+    if seconds < 0:
+        seconds = 0
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    cs = int(round((seconds - int(seconds)) * 100))
+    return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+
+def build_ass_karaoke(
+    words: list[dict],
+    *,
+    intro_offset_seconds: float = 0.0,
+    words_per_cue: int = DEFAULT_WORDS_PER_CUE,
+) -> str:
+    """Generate ASS karaoke subtitles: 62px white bold black stroke, karaoke effect."""
+    if not words:
+        return ASS_HEADER
+    cues: list[tuple[float, float, str, list[dict]]] = []
+    bucket: list[dict] = []
+    bucket_start: float | None = None
+    last_end = 0.0
+
+    def _flush(end_ts: float):
+        nonlocal bucket, bucket_start
+        if not bucket or bucket_start is None:
+            return
+        cues.append((bucket_start, end_ts, " ".join(w["word"] for w in bucket), list(bucket)))
+        bucket = []
+        bucket_start = None
+
+    for i, w in enumerate(words):
+        wt = w["word"].strip()
+        if not wt:
+            continue
+        if bucket_start is None:
+            bucket_start = w["start"]
+        bucket.append(w)
+        last_end = w["end"]
+        long_pause = i + 1 < len(words) and words[i + 1]["start"] - w["end"] > 0.45
+        sentence_break = wt.endswith((".", "!", "?"))
+        cue_full = len(bucket) >= words_per_cue
+        cue_too_long = (w["end"] - bucket_start) >= 3.0
+        if cue_full or sentence_break or long_pause or cue_too_long:
+            _flush(w["end"])
+    _flush(last_end)
+
+    lines = [ASS_HEADER.strip()]
+    for start, end, text, wlist in cues:
+        s = start + intro_offset_seconds
+        e = max(end, start + 0.5) + intro_offset_seconds
+        karaoke = ""
+        for w in wlist:
+            dur_cs = max(1, int(round((w["end"] - w["start"]) * 100)))
+            karaoke += f"{{\\k{dur_cs}}}{w['word']} "
+        karaoke = karaoke.strip()
+        lines.append(f"Dialogue: 0,{_ass_ts(s)},{_ass_ts(e)},Default,,0,0,0,,{karaoke}")
+    return "\n".join(lines) + "\n"
+
+
+def write_ass_karaoke(
+    words: list[dict],
+    out_path: Path,
+    *,
+    intro_offset_seconds: float = 0.0,
+    words_per_cue: int = DEFAULT_WORDS_PER_CUE,
+) -> Path:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        build_ass_karaoke(words, intro_offset_seconds=intro_offset_seconds, words_per_cue=words_per_cue),
+        encoding="utf-8",
+    )
+    return out_path
+
+
+def build_ass_from_cues(cues: list[dict]) -> str:
+    """Fallback ASS when no word timestamps."""
+    lines = [ASS_HEADER.strip()]
+    for c in cues:
+        text = _clean_caption(str(c.get("text") or ""))
+        if not text:
+            continue
+        s = float(c.get("start") or 0.0)
+        e = float(c.get("end") or 0.0)
+        if e <= s:
+            e = s + 0.5
+        lines.append(f"Dialogue: 0,{_ass_ts(s)},{_ass_ts(e)},Default,,0,0,0,,{text}")
+    return "\n".join(lines) + "\n"
+
+
+def write_ass_from_cues(cues: list[dict], out_path: Path) -> Path:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(build_ass_from_cues(cues), encoding="utf-8")
     return out_path

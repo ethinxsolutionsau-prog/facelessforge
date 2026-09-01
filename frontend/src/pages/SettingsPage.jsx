@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Loader2, Save } from "lucide-react";
+import { Loader2, Save, CreditCard } from "lucide-react";
 import AppShell from "../components/AppShell";
 import TopBar from "../components/TopBar";
 import { api, formatApiError } from "../lib/api";
@@ -52,8 +53,27 @@ export default function SettingsPage() {
 
   return (
     <AppShell>
-      <TopBar title="Settings" subtitle="Studio configuration" />
+      <TopBar
+        title="Settings"
+        subtitle="Studio configuration"
+        right={
+          <Link
+            to="/pricing"
+            data-testid="settings-billing-tab"
+            className="flex items-center gap-2 font-mono text-[11px] tracking-widest uppercase px-3 py-1.5 border border-zinc-800 hover:border-[#00E5FF] hover:text-[#00E5FF] text-zinc-400 rounded-sm transition-colors"
+          >
+            <CreditCard size={12} /> Billing
+          </Link>
+        }
+      />
       <div className="p-8 max-w-3xl space-y-6">
+        <div className="border border-zinc-800 bg-[#121212] p-4 rounded-sm flex items-center justify-between">
+          <div>
+            <div className="text-sm font-semibold text-white flex items-center gap-2"><CreditCard size={14} className="text-[#00E5FF]" /> Billing</div>
+            <div className="font-mono text-[10px] text-zinc-500 mt-1">Manage subscription, view credits, update plan — Dodo Payments</div>
+          </div>
+          <Link to="/pricing" data-testid="settings-go-billing" className="font-mono text-[11px] tracking-widest uppercase bg-[#00E5FF] text-black px-3 py-1.5 rounded-sm hover:bg-[#33EFFF]">Go to Billing →</Link>
+        </div>
         <div className="border border-zinc-800 bg-[#121212] p-6 rounded-sm space-y-5">
           <h3 className="text-sm font-semibold text-white mb-2">AI provider</h3>
           <div>
@@ -64,8 +84,7 @@ export default function SettingsPage() {
               onChange={(e) => setSettings({ ...settings, preferred_provider: e.target.value })}
               className={inp + " font-mono uppercase text-xs"}
             >
-              <option value="openai/gpt-5.2">openai / gpt-5.2</option>
-              <option value="openai/gpt-5.1">openai / gpt-5.1</option>
+              <option value="deepseek/deepseek-chat">deepseek / deepseek-chat</option>
               <option value="anthropic/claude-sonnet-4-5-20250929">anthropic / claude-sonnet-4.5</option>
               <option value="gemini/gemini-3-flash-preview">gemini / 3-flash-preview</option>
             </select>

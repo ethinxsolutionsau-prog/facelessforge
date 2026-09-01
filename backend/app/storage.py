@@ -234,13 +234,33 @@ class S3Storage(StorageBackend):
         return self._client
 
     def _public_or_signed_url(self, key: str) -> str:
-        if self.public_base:
+        # Fix R2 403: force presigned when STORAGE_FORCE_PRESIGNED=true or R2 bucket detected as private
+        force_presigned = (os.environ.get("STORAGE_FORCE_PRESIGNED", "").strip().lower() in ("1","true","yes") or
+                           os.environ.get("STORAGE_USE_PRESIGNED","").strip().lower() in ("1","true","yes"))
+        # Auto-detect R2 private bucket - videos.ethinx.solutions is not public (403), so use presigned
+        is_r2 = bool(self.endpoint_url and "r2.cloudflarestorage.com" in self.endpoint_url)
+        if self.public_base and not force_presigned and not is_r2:
             return f"{self.public_base}/{key.lstrip('/')}"
+        # Presigned fallback - also for R2 even when public_base set
+        try:
+            client = self._client_or_raise()
+            return client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self.bucket, "Key": key},
+                ExpiresIn=self.signed_ttl,
+            )
+        except Exception as e:
+            logger.warning(f"presigned fallback failed for {key}: {e} - returning public_base")
+            if self.public_base:
+                return f"{self.public_base}/{key.lstrip('/')}"
+            raise
+
+    def get_presigned_url(self, key: str, expires_in: Optional[int] = None) -> str:
         client = self._client_or_raise()
         return client.generate_presigned_url(
             "get_object",
             Params={"Bucket": self.bucket, "Key": key},
-            ExpiresIn=self.signed_ttl,
+            ExpiresIn=expires_in or self.signed_ttl,
         )
 
     def save_file(self, local_path: Path, key: str, content_type: str) -> SaveResult:

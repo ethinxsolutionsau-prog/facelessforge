@@ -109,9 +109,9 @@ def _mock_svg(seed: str, project: dict, brief: dict) -> bytes:
   <rect x="820" y="100" width="380" height="8" fill="{secondary}"/>
   <rect x="820" y="130" width="260" height="8" fill="{accent}" opacity="0.6"/>
   <rect x="820" y="160" width="300" height="4" fill="{accent}" opacity="0.3"/>
-  <text x="820" y="300" font-family="Inter, sans-serif" font-weight="800" font-size="56" fill="#FFFFFF" letter-spacing="-2">{title}</text>
-  <text x="820" y="360" font-family="JetBrains Mono, monospace" font-size="18" fill="#A1A1AA" letter-spacing="2">FACELESSFORGE · CONCEPT</text>
-  <text x="820" y="560" font-family="Inter, sans-serif" font-size="22" fill="#A1A1AA">{topic}</text>
+  <text x="640" y="300" font-family="Inter, sans-serif" font-weight="800" font-size="56" fill="#FFFFFF" letter-spacing="-2" text-anchor="middle" style="display:flex;justify-content:center;align-items:center;text-align:center">{title}</text>
+  <text x="640" y="360" font-family="JetBrains Mono, monospace" font-size="18" fill="#A1A1AA" letter-spacing="2" text-anchor="middle">FACELESSFORGE · CONCEPT</text>
+  <text x="640" y="560" font-family="Inter, sans-serif" font-size="22" fill="#A1A1AA" text-anchor="middle">{topic}</text>
   <rect x="0" y="700" width="1280" height="20" fill="{accent}" opacity="0.7"/>
 </svg>'''
     return svg.encode("utf-8")

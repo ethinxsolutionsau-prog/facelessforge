@@ -49,10 +49,28 @@ SUPPORTED_STYLES = list(VOICE_STYLE_MAP.keys())
 MAX_CHARS_PER_CHUNK = 4500
 ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1"
 STABILITY_FOR_TONE = {"calm": 0.70, "energetic": 0.30, "dramatic": 0.30, "narrator": 0.55, "corporate": 0.60, "documentary": 0.65, "mysterious": 0.45}
+PRONUNCIATION_DICT = {"Palotine": "Palatine", "salutateo": "salutatio", "Hora Prima": "Hora Prima pause"}
+
+def apply_pronunciation_map(text: str) -> str:
+    """FIX Pronunciation: preprocess script with dict before TTS."""
+    if not text:
+        return text
+    for k, v in PRONUNCIATION_DICT.items():
+        # case-sensitive replace for capital variants, also lowercase fallback for salutatio
+        text = text.replace(k, v)
+        # handle lowercase variant for salutatio
+        if k.lower() != k:
+            text = re.sub(re.escape(k), v, text, flags=re.IGNORECASE) if k.lower() == "salutateo" else text
+    # extra case-insensitive for Palotine family
+    text = re.sub(r"Palotine", "Palatine", text, flags=re.IGNORECASE) if "Palotine" in PRONUNCIATION_DICT else text
+    return text
+
 def normalize_for_tts(text: str) -> str:
     """Replace EthinX variants with E-thinks for TTS only. Keep display/subtitles as EthinX.
     Handles EthinX/Ethinx/ETHINX/Ethan X (case-insensitive) -> E-thinks.
     ElevenLabs fallback: IPA phoneme iː θɪŋks via <phoneme> if SSML enabled."""
+    # FIX: pronunciation dict first
+    text = apply_pronunciation_map(text)
     # Primary plain-text replacement for correct pronunciation
     # Order matters: longer patterns first
     text = re.sub(r'Ethan\s*X', 'E-thinks', text, flags=re.IGNORECASE)

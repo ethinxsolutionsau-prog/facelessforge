@@ -11,6 +11,11 @@ Two layers:
    (e.g. ``"cinematic moody slow-motion neon-lit"``) that gets appended to
    every per-scene Pexels query so all clips share a consistent visual
    world. Cached on the project row so it only runs once per script.
+
+Constitution fix v2.7: Preserve full Visual field including commas,
+append "4k slow motion b-roll cinematic", generate 3 ordered queries
+[pexels_video, pixabay_video, unsplash_image] video preferred first.
+Stop leaking script words like "might", "obsolete", "coming", "year".
 """
 from __future__ import annotations
 
@@ -21,7 +26,7 @@ from typing import Optional
 
 logger = logging.getLogger("facelessforge.visual_query")
 
-# Same stopword set as video_engine.py, lightly expanded for our domain.
+# Same stopword set as video_engine.py, expanded to block leak words
 _STOP_WORDS = {
     "the", "and", "a", "an", "of", "to", "is", "in", "we", "you", "your", "our",
     "for", "on", "this", "that", "with", "by", "it", "are", "do", "does", "get",
@@ -29,7 +34,14 @@ _STOP_WORDS = {
     "from", "at", "was", "were", "they", "them", "their", "what", "who", "how",
     "why", "when", "where", "can", "will", "just", "all", "any", "some", "more",
     "most", "than", "then", "into", "out", "also", "only", "even", "very",
+    # Leak blocklist: abstract/modal/temporal/script dregs that must never be standalone queries
+    "might", "obsolete", "coming", "year", "years", "will", "shall", "should", "could", "would", "may",
+    "about", "hear", "story", "cover", "converts", "alter", "small", "businesses", "drowning",
+    "imagine", "software", "shift", "machine", "impact", "simulate", "future", "past", "today", "tomorrow",
+    "must", "shall", "may", "might", "could", "would", "should", "will", "been", "being",
 }
+
+CINEMATIC_SUFFIX = "4k slow motion b-roll cinematic"
 
 
 def is_garbage_token(token: str) -> bool:
@@ -70,6 +82,7 @@ def extract_visual_keywords(text: str, *, top_n: int = 3) -> list[str]:
     Ported from video_engine.py — robust fallback when LLM unavailable.
     Drops stopwords, words shorter than 4 chars, and garbage tokens
     (``is_garbage_token``); preserves insertion order.
+    Filters leak words like might/obsolete/coming/year.
     """
     if not text:
         return []
@@ -88,22 +101,76 @@ def extract_visual_keywords(text: str, *, top_n: int = 3) -> list[str]:
     return out
 
 
+def _clean_visual(visual: str) -> str:
+    """Preserve full Visual including commas, normalize whitespace only."""
+    if not visual:
+        return ""
+    return " ".join(str(visual or "").strip().split())
+
+def _core_from_visual_or_terms(visual: str, search_terms: list | None, max_words: int = 4) -> str:
+    """Extract 3-4 word core for shorter fallback queries.
+    Prefers search_terms multi-word phrases, then visual keywords.
+    Ensures not single-word leak.
+    """
+    if search_terms:
+        for t in search_terms:
+            clean = " ".join(str(t or "").split()).strip()
+            if not clean:
+                continue
+            words = clean.split()
+            if len(words) == 1 and words[0].lower() in _STOP_WORDS:
+                continue
+            if len(words) == 1 and len(words[0]) < 4:
+                continue
+            if len(words) >= 2:
+                filtered = [w for w in words if w.lower() not in _STOP_WORDS and len(w) >= 3 and not is_garbage_token(w)]
+                if len(filtered) >= 2:
+                    return " ".join(filtered[:max_words])
+                return " ".join(words[:max_words])
+    # Fallback from visual
+    words = re.findall(r"[a-z]{3,}", (visual or "").lower())
+    kw = [w for w in words if w not in _STOP_WORDS and not is_garbage_token(w)]
+    seen = set()
+    out = []
+    for w in kw:
+        if w not in seen:
+            seen.add(w)
+            out.append(w)
+        if len(out) >= max_words:
+            break
+    if len(out) >= 2:
+        return " ".join(out[:max_words])
+    if out:
+        return " ".join(out)
+    return "nature cinematic"
+
+
 def build_scene_query(
     scene: dict,
     *,
     visual_tone: Optional[str] = None,
-    fallback_text_fields: tuple[str, ...] = ("narration_text", "caption_text", "visual_direction"),
+    fallback_text_fields: tuple[str, ...] = ("visual_direction", "narration_text", "caption_text"),
 ) -> str:
     """Compose the Pexels query for one scene.
 
-    Priority order for the base query:
-      1. ``scene.search_terms``  (LLM-derived during script generation; best)
-      2. Top-3 keywords from narration_text / caption_text / visual_direction
+    Priority order (v2.7 fix):
+      1. Full ``scene.visual_direction`` preserved verbatim + CINEMATIC_SUFFIX (no truncation, no comma split)
+      2. Fallback to search_terms filtered (multi-word)
+      3. Top-3 keywords from visual_direction / narration_text
 
-    The project-wide ``visual_tone`` modifier is then appended so every
-    scene pulls from the same visual world.
+    The project-wide ``visual_tone`` modifier is appended if provided, but
+    cinematic suffix is already included for video queries. Returns full visual + cinematic.
     """
-    base = ""
+    # v2.7: Prefer full Visual field directly, preserve commas
+    visual = _clean_visual(scene.get("visual_direction") or "")
+    if visual:
+        base = f"{visual} {CINEMATIC_SUFFIX}".strip()
+        if visual_tone and visual_tone.strip():
+            base = f"{base} {visual_tone.strip()}".strip()
+        # Ensure no single-word leak edge case
+        if len(base.split()) >= 4:
+            return base
+    # Fallback to search_terms
     search_terms = scene.get("search_terms")
     if isinstance(search_terms, list):
         raw = " ".join(str(x) for x in search_terms if x)
@@ -112,24 +179,70 @@ def build_scene_query(
     else:
         raw = ""
     if raw:
-        # Keep only real, query-safe words — LLM output can contain garbage
-        # like "STARTUPSTARTUPSTARTU" which returns zero Pexels results.
         words = [w for w in re.sub(r"[^\w\s\-]", " ", raw.lower()).split()
                  if w not in _STOP_WORDS and not is_garbage_token(w)]
         deduped = list(dict.fromkeys(words))
         base = " ".join(deduped[:6]).strip()
+        if base and len(base.split()) >= 2:
+            if visual_tone and visual_tone.strip():
+                return f"{base} {CINEMATIC_SUFFIX} {visual_tone.strip()}".strip()
+            return f"{base} {CINEMATIC_SUFFIX}".strip()
+    # Fallback to keywords from fields
+    base = ""
+    for field in fallback_text_fields:
+        text = scene.get(field) or ""
+        kws = extract_visual_keywords(str(text), top_n=4)
+        if kws and len(kws) >= 2:
+            base = " ".join(kws)
+            break
     if not base:
-        for field in fallback_text_fields:
-            text = scene.get(field) or ""
-            kws = extract_visual_keywords(str(text))
-            if kws:
-                base = " ".join(kws)
-                break
-    if not base:
-        base = "abstract motion"  # last-resort generic
+        base = "abstract motion"
     if visual_tone and visual_tone.strip():
-        return f"{base} {visual_tone.strip()}".strip()
-    return base
+        return f"{base} {CINEMATIC_SUFFIX} {visual_tone.strip()}".strip()
+    return f"{base} {CINEMATIC_SUFFIX}".strip()
+
+def build_ordered_queries(scene: dict, project: dict | None = None, visual_tone: str | None = None) -> list[dict]:
+    """Generate exactly 3 ordered query objects per scene:
+       0: pexels_video (full Visual + cinematic) - preferred
+       1: pixabay_video (shorter core 3-4 words)
+       2: unsplash_image (shortest 2-3 words)
+    Mirrors JS fix: preserves full Visual including comma detail.
+    """
+    visual = _clean_visual(scene.get("visual_direction") or scene.get("visual") or "")
+    search_terms = scene.get("search_terms") or []
+    if not visual:
+        if search_terms and isinstance(search_terms, list):
+            for t in search_terms:
+                if t and len(str(t).split()) >= 2:
+                    visual = str(t)
+                    break
+            if not visual:
+                visual = str(search_terms[0]) if search_terms else ""
+        elif isinstance(search_terms, str):
+            visual = search_terms
+        else:
+            visual = (project.get("topic") if project and project.get("topic") else "") or "nature cinematic"
+    cleaned = _clean_visual(visual) or "nature cinematic"
+    # Full cinematic for pexels
+    pexels_q = f"{cleaned} {CINEMATIC_SUFFIX}".strip()
+    if visual_tone and visual_tone.strip():
+        pexels_q = f"{pexels_q} {visual_tone.strip()}".strip()
+    core = _core_from_visual_or_terms(cleaned, search_terms, max_words=4)
+    pixabay_q = core if core else "nature cinematic"
+    if len(pixabay_q.split()) < 2:
+        pixabay_q = "nature cinematic b-roll"
+    unsplash_q = " ".join(core.split()[:3]).strip() if core else "nature cinematic"
+    if len(unsplash_q.split()) < 2:
+        unsplash_q = "nature cinematic"
+    return [
+        {"source": "pexels", "type": "video", "media_type": "videos", "query": pexels_q},
+        {"source": "pixabay", "type": "video", "media_type": "videos", "query": pixabay_q},
+        {"source": "unsplash", "type": "image", "media_type": "photos", "query": unsplash_q},
+    ]
+
+# Alias for scene_terms compatibility
+def build_scene_queries(scene: dict, project: dict | None = None) -> list[dict]:
+    return build_ordered_queries(scene, project)
 
 
 async def derive_visual_tone(full_script: str) -> str:

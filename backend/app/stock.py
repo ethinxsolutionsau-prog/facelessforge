@@ -45,9 +45,81 @@ import os
 from typing import Literal, Optional
 
 import httpx
+import re
 import requests  # requests-compatible via httpx; key used via params={'key': key}
 
 logger = logging.getLogger("facelessforge.stock")
+
+# ── FIX: Visual mismatch blocklist + text-date filter ───────────────────
+BLOCKLIST = ["split", "saldi", "slack", "2026", "sale", "umbrella", "tourist"]
+# matches 4-9.9.2026 variants like "4.9.2026", "5.9.2026", "4-9.9.2026"
+DATE_TEXT_RE = re.compile(r"(?:^|[^0-9])(?:[4-9]\.9\.2026|4-9\.9\.2026)(?:[^0-9]|$)")
+SHORTS_RE = re.compile(r"\bshorts\b", re.I)
+# project-wide dedupe of last 10 asset IDs (global)
+_LAST_ASSET_IDS: set[str] = set()
+_LAST_ASSET_IDS_ORDER: list[str] = []
+
+
+def _is_blocklisted(item: dict) -> bool:
+    """Return True if item matches visual-mismatch blocklist.
+
+    Spec: blocklist = ["Split","SALDI","Slack","2026","sale","umbrella","tourist"]
+    + shorts (modern person bounding box with shorts) proxy via tags/title
+    + image contains text with numbers 4-9.9.2026
+    Checks tags, title, source_url, preview_url case-insensitively.
+    """
+    tags = item.get("tags") or []
+    title = str(item.get("title") or "")
+    source_url = str(item.get("source_url") or "")
+    preview_url = str(item.get("preview_url") or "")
+    combined = " ".join([str(t) for t in tags] + [title, source_url]).lower()
+    for w in BLOCKLIST:
+        if w.lower() in combined:
+            logger.info("BLOCKLIST_FILTER reject ext_id=%s reason=blocklist_word=%s title=%r tags=%s", item.get("external_id"), w, title[:60], tags[:2])
+            return True
+    # shorts proxy
+    if SHORTS_RE.search(combined):
+        logger.info("BLOCKLIST_FILTER reject ext_id=%s reason=shorts_proxy tags=%s title=%r", item.get("external_id"), tags[:2], title[:60])
+        return True
+    # date text 4-9.9.2026 etc in title/tags
+    raw = " ".join([str(t) for t in tags] + [title])
+    if DATE_TEXT_RE.search(raw):
+        logger.info("BLOCKLIST_FILTER reject ext_id=%s reason=date_text_4-9.9.2026 raw=%r", item.get("external_id"), raw[:80])
+        return True
+    return False
+
+
+def _dedupe_and_filter_items(items: list[dict]) -> list[dict]:
+    """Apply blocklist + de-dupe (last 10 asset IDs) + preview_url dedupe.
+
+    Keeps global _LAST_ASSET_IDS of last 10 external_ids; if duplicate -> discard and fetch next.
+    Also discards blocklisted items immediately.
+    """
+    global _LAST_ASSET_IDS, _LAST_ASSET_IDS_ORDER
+    out: list[dict] = []
+    seen_urls: set[str] = set()
+    for it in items:
+        ext = str(it.get("external_id") or "").strip()
+        if ext and ext in _LAST_ASSET_IDS:
+            logger.info("DEDUPE_FILTER reject ext_id=%s reason=duplicate_last10", ext)
+            continue
+        if _is_blocklisted(it):
+            continue
+        # also dedupe by preview_url within this batch
+        k = it.get("preview_url") or ext
+        if k and k in seen_urls:
+            continue
+        seen_urls.add(k)
+        out.append(it)
+        # track for future calls (keep last 10)
+        if ext:
+            if ext not in _LAST_ASSET_IDS:
+                _LAST_ASSET_IDS_ORDER.append(ext)
+                _LAST_ASSET_IDS.add(ext)
+                while len(_LAST_ASSET_IDS_ORDER) > 10:
+                    old = _LAST_ASSET_IDS_ORDER.pop(0)
+                    _LAST_ASSET_IDS.discard(old)
+    return out
 
 MediaType = Literal["both", "videos", "photos"]
 
@@ -61,9 +133,31 @@ def _use_mock() -> bool:
     return flag or not key
 
 
+def _has_any_stock_key() -> bool:
+    """Check if any stock provider key is configured."""
+    return bool(
+        os.environ.get("PEXELS_API_KEY", "").strip()
+        or os.environ.get("PIXABAY_API_KEY", "").strip()
+        or os.environ.get("UNSPLASH_ACCESS_KEY", "").strip()
+    )
+
+
+def _should_use_mock_aggregated() -> bool:
+    """Mock if flag set or no keys at all (all providers missing)."""
+    flag = os.environ.get("USE_MOCK_PEXELS", "true").strip().lower() in ("1", "true", "yes")
+    if flag:
+        return True
+    return not _has_any_stock_key()
+
+
 def is_mock_mode() -> bool:
     """Exposed helper for the API layer so the UI can show a 'mock' badge."""
     return _use_mock()
+
+
+def is_mock_mode_aggregated() -> bool:
+    """Mock mode for aggregated search — true only if all keys missing or flag set."""
+    return _should_use_mock_aggregated()
 
 
 # ── Relevance scoring ─────────────────────────────────────────────────────
@@ -290,6 +384,9 @@ async def _search_pexels(
                 query[:60], per_page, len(raw_videos), kept,
             )
 
+    # FIX: blocklist + dedupe (last 10) filter
+    out = _dedupe_and_filter_items(out)
+    logger.info("BLOCKLIST post-filter query=%r remaining=%d", query[:60], len(out))
     return out
 
 # ── Pixabay adapters ─────────────────────────────────────────────────────
@@ -392,6 +489,7 @@ async def _search_pixabay(query: str, media_type: MediaType, per_page: int) -> l
                 if len(valid) >= per_page:
                     break
             out.extend(valid[:per_page])
+    out = _dedupe_and_filter_items(out)
     return out
 
 # ── Unsplash adapters ────────────────────────────────────────────────────
@@ -434,6 +532,7 @@ async def _search_unsplash(query: str, per_page: int) -> list[dict]:
         out = []
         for p in (data.get("results") or [])[:per_page]:
             out.append(_normalise_unsplash_photo(p, query))
+        out = _dedupe_and_filter_items(out)
         return out
 
 # ── Unified dispatcher ────────────────────────────────────────────────────
@@ -446,6 +545,8 @@ async def search_stock_with_source(query: str, source: str, media_type: MediaTyp
     Falls back to mock if provider key missing or rate-limited.
     """
     query = (query or "").strip()
+    if query and len(query.split()) > 4:
+        query = " ".join(query.split()[:4])
     source = (source or "pexels").strip().lower()
     if not query:
         return {"source": source if source in ("pexels","pixabay","unsplash") else "mock", "results": [], "mock": True, "query": ""}
@@ -461,12 +562,14 @@ async def search_stock_with_source(query: str, source: str, media_type: MediaTyp
             query_terms = [t.lower() for t in query.split() if len(t) > 2]
             if query_terms:
                 results.sort(key=lambda c: score_relevance(c, query_terms), reverse=True)
+            results = _dedupe_and_filter_items(results)
             return {"source": "pixabay", "results": results, "mock": False, "query": query}
         elif source == "unsplash":
             results = await _search_unsplash(query, per_page)
             query_terms = [t.lower() for t in query.split() if len(t) > 2]
             if query_terms:
                 results.sort(key=lambda c: score_relevance(c, query_terms), reverse=True)
+            results = _dedupe_and_filter_items(results)
             return {"source": "unsplash", "results": results, "mock": False, "query": query}
         else:  # pexels default
             # Use existing search_stock path which handles mock fallback internally
@@ -487,6 +590,149 @@ async def search_stock_with_source(query: str, source: str, media_type: MediaTyp
     except httpx.HTTPError as e:
         logger.warning("%s HTTP error %s — mock fallback", source, e)
         return {"source": "mock", "results": _mock_results(query, media_type, per_page), "mock": True, "query": query, "warning": f"{source} unavailable — mock results"}
+
+# ── Aggregated multi-source search ───────────────────────────────────────
+
+async def search_stock_aggregated(
+    query: str,
+    media_type: MediaType = "both",
+    per_page: int = 12,
+) -> dict:
+    """Aggregated search across Pexels + Pixabay + Unsplash.
+
+    - Tries Pexels if PEXELS_API_KEY set.
+    - Also queries Pixabay if PIXABAY_API_KEY set.
+    - Also queries Unsplash if UNSPLASH_ACCESS_KEY set (photos only).
+    - Merges results round-robin to preserve mix, normalises to same shape.
+    - Does NOT truncate query server-side; uses full body.query as-is.
+    - Returns {source: "mixed" | "pexels" | "pixabay" | "unsplash" | "mock", results, mock, query, warning?}
+    - If all keys missing or USE_MOCK_PEXELS true -> mock mode with warning.
+    """
+    query = (query or "").strip()
+    if query and len(query.split()) > 4:
+        query = " ".join(query.split()[:4])
+    if not query:
+        is_mock = _should_use_mock_aggregated()
+        src = "mock" if is_mock else "mixed"
+        return {"source": src, "results": [], "mock": is_mock, "query": ""}
+
+    if _should_use_mock_aggregated():
+        logger.info("search_stock_aggregated mock mode query=%r", query[:60])
+        return {
+            "source": "mock",
+            "results": _mock_results(query, media_type, per_page),
+            "mock": True,
+            "query": query,
+            "warning": "No stock API keys configured — showing deterministic mock results.",
+        }
+
+    # Determine enabled providers
+    providers: list[str] = []
+    if os.environ.get("PEXELS_API_KEY", "").strip():
+        providers.append("pexels")
+    if os.environ.get("PIXABAY_API_KEY", "").strip():
+        providers.append("pixabay")
+    if os.environ.get("UNSPLASH_ACCESS_KEY", "").strip():
+        providers.append("unsplash")
+
+    if not providers:
+        return {
+            "source": "mock",
+            "results": _mock_results(query, media_type, per_page),
+            "mock": True,
+            "query": query,
+            "warning": "No stock API keys configured — showing deterministic mock results.",
+        }
+
+    # Build tasks per provider; each gets per_page to allow merging then slice
+    tasks = []
+    task_sources: list[str] = []
+    for src in providers:
+        # Unsplash only supports photos — skip it when caller wants videos only
+        if src == "unsplash" and media_type == "videos":
+            continue
+        mt = media_type
+        if src == "unsplash" and media_type == "both":
+            mt = "photos"
+        if src == "pexels":
+            tasks.append(_search_pexels(query, mt, per_page))
+            task_sources.append(src)
+        elif src == "pixabay":
+            tasks.append(_search_pixabay(query, mt, per_page))
+            task_sources.append(src)
+        elif src == "unsplash":
+            tasks.append(_search_unsplash(query, per_page))
+            task_sources.append(src)
+
+    gathered = await asyncio.gather(*tasks, return_exceptions=True)
+
+    results_by_source: list[list[dict]] = []
+    successful_sources: list[str] = []
+    warnings: list[str] = []
+    for src, res in zip(task_sources, gathered):
+        if isinstance(res, Exception):
+            msg = str(res)
+            if "rate_limited" in msg or "no_key" in msg:
+                logger.warning("search_stock_aggregated %s failed query=%r: %s", src, query[:60], msg)
+                warnings.append(src)
+            else:
+                logger.warning("search_stock_aggregated %s HTTP error query=%r: %s", src, query[:60], res)
+                warnings.append(src)
+            continue
+        # res is list[dict]
+        if isinstance(res, list) and res:
+            # Already normalised, ensure source field correct
+            results_by_source.append(res)
+            successful_sources.append(src)
+        elif isinstance(res, list):
+            results_by_source.append([])
+            successful_sources.append(src)
+
+    if not results_by_source or all(len(lst) == 0 for lst in results_by_source):
+        # All providers returned empty — fallback to mock with warning if appropriate
+        logger.warning("search_stock_aggregated all providers empty query=%r, falling back to mock", query[:60])
+        return {
+            "source": "mock",
+            "results": _mock_results(query, media_type, per_page),
+            "mock": True,
+            "query": query,
+            "warning": "All stock providers returned no results — showing mock results.",
+        }
+
+    # Score relevance per provider already? Ensure scoring across merged? We'll keep interleaving then score overall
+    # Interleave round-robin to ensure mix representation up to per_page
+    merged: list[dict] = []
+    max_len = max(len(lst) for lst in results_by_source) if results_by_source else 0
+    for i in range(max_len):
+        for lst in results_by_source:
+            if i < len(lst) and len(merged) < per_page:
+                merged.append(lst[i])
+        if len(merged) >= per_page:
+            break
+
+    # If still under per_page (e.g., one provider had few results), fill remaining sequentially
+    if len(merged) < per_page:
+        for lst in results_by_source:
+            for item in lst:
+                if item not in merged and len(merged) < per_page:
+                    merged.append(item)
+
+    # FIX: blocklist + last10 dedupe
+    merged = _dedupe_and_filter_items(merged)
+
+    # Optional: sort by relevance overall? Keep interleaved order to preserve mix; but apply relevance as secondary sort within each provider already.
+    # Determine source label
+    if len(successful_sources) == 1:
+        agg_source = successful_sources[0]
+    else:
+        agg_source = "mixed"
+
+    out: dict = {"source": agg_source, "results": merged[:per_page], "mock": False, "query": query}
+    if warnings:
+        out["warning"] = f"Some providers unavailable ({', '.join(warnings)}) — showing partial results."
+    # If all keys missing case already handled, but add warning if aggregated used mock-like? Not needed.
+    return out
+
 
 # ── Public ──────────────────────────────────────────────────────────────────
 
@@ -519,6 +765,7 @@ async def search_stock_videos(query: str, per_page: int = 30) -> list[dict]:
         return []
     videos = [r for r in results
               if r.get("media_type") == "stock_video" and r.get("download_url")]
+    videos = _dedupe_and_filter_items(videos)
     query_terms = [t.lower() for t in query.split() if len(t) > 2]
     if query_terms:
         videos.sort(key=lambda c: score_relevance(c, query_terms), reverse=True)
@@ -547,6 +794,8 @@ async def search_stock(
     query = (query or "").strip()
     if visual_tone and visual_tone.strip():
         query = f"{query} {visual_tone.strip()}".strip()
+    if query and len(query.split()) > 4:
+        query = " ".join(query.split()[:4])
     if not query:
         return {"source": "mock" if _use_mock() else "pexels", "results": [], "mock": _use_mock(), "query": ""}
 
@@ -568,6 +817,8 @@ async def search_stock(
         query_terms = [t.lower() for t in query.split() if len(t) > 2]
         if query_terms:
             results.sort(key=lambda c: score_relevance(c, query_terms), reverse=True)
+
+        results = _dedupe_and_filter_items(results)
 
         return {"source": "pexels", "results": results, "mock": False, "query": query}
     except RuntimeError as e:

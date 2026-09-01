@@ -129,7 +129,7 @@ export default function ProjectDetailPage() {
       <div className="p-8 space-y-6">
         {/* Header summary */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2 border border-zinc-800 bg-[#121212] p-6 rounded-sm space-y-4">
+          <div className="lg:col-span-2 border border-[rgba(59,130,246,0.15)] bg-[#1c2333] p-6 rounded-sm space-y-4">
             <div className="flex items-center gap-3">
               <StatusBadge status={project.status} />
               <span className="font-mono text-[10px] text-zinc-500 uppercase tracking-widest">
@@ -139,38 +139,41 @@ export default function ProjectDetailPage() {
                 Est. cost · {formatCurrency(project.estimated_cost)}
               </span>
             </div>
-            <p className="text-sm text-zinc-300 leading-relaxed">{project.topic}</p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-3 border-t border-zinc-800">
+            <p className="text-sm text-slate-300 leading-relaxed">{project.topic}</p>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 pt-3 border-t border-[rgba(59,130,246,0.15)]">
               {[
-                ["Audience", project.audience],
-                ["Tone", project.tone],
-                ["Voice", project.voice_style],
-                ["Visual", project.visual_style],
-                ["Monetisation", project.monetisation_intent],
-                ["CTA", project.cta_goal],
-              ].map(([k, v]) => (
-                <div key={k}>
-                  <div className="font-mono text-[10px] uppercase tracking-widest text-zinc-500 mb-1">{k}</div>
-                  <div className="text-sm text-zinc-200 truncate">{v}</div>
+                ["Who's watching? ⓘ", project.audience, "Who will watch this? This shapes voice + examples"],
+                ["What's the goal? ⓘ", project.monetisation_intent, "What do you want this video to do?"],
+                ["What should they do? ⓘ", project.cta_goal, "Main action you want viewer to take"],
+                ["Tone", project.tone, null],
+                ["Voice", project.voice_style, null],
+                ["Visual", project.visual_style, null],
+              ].map(([k, v, tip]) => (
+                <div key={k} className="relative group">
+                  <div className="font-mono text-[10px] uppercase tracking-widest text-slate-400 mb-1 flex items-center gap-1">{k}
+                    {tip && <span className="inline-flex w-3 h-3 rounded-full bg-blue-500/20 border border-blue-400/40 text-blue-400 text-[8px] items-center justify-center">ⓘ</span>}
+                  </div>
+                  {tip && <span className="hidden group-hover:block absolute left-0 bottom-full mb-1 bg-slate-800 text-xs text-slate-100 px-2 py-1 rounded shadow z-10 whitespace-nowrap">{tip}</span>}
+                  <div className="text-sm text-slate-200 truncate">{v}</div>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="border border-zinc-800 bg-[#121212] p-6 rounded-sm space-y-4">
+          <div className="border border-[rgba(59,130,246,0.15)] bg-[#1c2333] p-6 rounded-sm space-y-4">
             <QualityScore score={project.quality_score || 0} />
-            <div className="pt-4 border-t border-zinc-800 flex items-center gap-3">
+            <div className="pt-4 border-t border-[rgba(59,130,246,0.15)] flex items-center gap-3">
               <a
                 data-testid="export-script-txt"
                 href={`${API}/projects/${project.id}/export/script.txt`}
-                className="flex-1 flex items-center justify-center gap-1.5 border border-zinc-800 text-zinc-300 hover:text-[#00E5FF] hover:border-[#00E5FF] text-xs font-mono uppercase tracking-widest px-2 py-2 rounded-sm transition-colors"
+                className="flex-1 flex items-center justify-center gap-1.5 border border-[rgba(59,130,246,0.15)] text-slate-200 hover:text-[#00E5FF] hover:border-[#00E5FF] text-xs font-mono uppercase tracking-widest px-2 py-2 rounded-sm transition-colors"
               >
                 <Download size={12} /> TXT
               </a>
               <a
                 data-testid="export-scenes-csv-top"
                 href={`${API}/projects/${project.id}/export/scenes.csv`}
-                className="flex-1 flex items-center justify-center gap-1.5 border border-zinc-800 text-zinc-300 hover:text-[#00E5FF] hover:border-[#00E5FF] text-xs font-mono uppercase tracking-widest px-2 py-2 rounded-sm transition-colors"
+                className="flex-1 flex items-center justify-center gap-1.5 border border-[rgba(59,130,246,0.15)] text-slate-200 hover:text-[#00E5FF] hover:border-[#00E5FF] text-xs font-mono uppercase tracking-widest px-2 py-2 rounded-sm transition-colors"
               >
                 <Download size={12} /> CSV
               </a>
@@ -186,7 +189,7 @@ export default function ProjectDetailPage() {
         </div>
 
         {/* Tabs */}
-        <div className="border-b border-zinc-800 flex items-center gap-1 overflow-x-auto">
+        <div className="border-b border-[rgba(59,130,246,0.15)] flex items-center gap-1 overflow-x-auto">
           {TABS.map((t) => (
             <button
               key={t.id}
@@ -245,7 +248,7 @@ export default function ProjectDetailPage() {
                     src={render_job.output_url}
                     poster={assets.find(a => a.id === project.selected_thumbnail_asset_id)?.preview_url}
                     preload="metadata"
-                    className="w-full rounded-sm border border-zinc-800 bg-black aspect-video"
+                    className="w-full rounded-sm border border-[rgba(59,130,246,0.15)] bg-black aspect-video"
                   />
                 </div>
               )}
@@ -262,7 +265,7 @@ export default function ProjectDetailPage() {
             <ScriptPanel projectId={project.id} script={script} canEdit={canEdit} onChange={setView} />
           )}
           {tab === "scenes" && (
-            <ScenePlanner projectId={project.id} scenes={scenes} canEdit={canEdit} onChange={setView} hasScript={!!script} attachedAssets={assets} />
+            <ScenePlanner projectId={project.id} project={project} scenes={scenes} canEdit={canEdit} onChange={setView} hasScript={!!script} attachedAssets={assets} />
           )}
           {tab === "metadata" && (
             <MetadataPanel
@@ -316,7 +319,7 @@ export default function ProjectDetailPage() {
 
 function OverviewTile({ label, ready, sub }) {
   return (
-    <div className="border border-zinc-800 bg-[#121212] p-5 rounded-sm">
+    <div className="border border-[rgba(59,130,246,0.15)] bg-[#1c2333] p-5 rounded-sm">
       <div className="flex items-center justify-between mb-4">
         <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">{label}</span>
         <span
@@ -326,7 +329,7 @@ function OverviewTile({ label, ready, sub }) {
           {ready ? "Ready" : "Pending"}
         </span>
       </div>
-      <div className="text-sm text-zinc-300">{sub}</div>
+      <div className="text-sm text-slate-200">{sub}</div>
     </div>
   );
 }

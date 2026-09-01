@@ -20,16 +20,38 @@ MAX_WHISPER_BYTES = 24 * 1024 * 1024
 
 
 async def transcribe_words(audio_path: Path, *, language: str = "en") -> list[dict]:
-    """Return a list of ``{"word": str, "start": float, "end": float}``.
+    """Return a list of ``{"word": str, "start": float, "end": float}`` via faster-whisper logic.
 
-    Returns an empty list if the API key is missing or transcription fails.
-    The caller falls back to its own time-proportional cueing in that case.
+    Uses faster-whisper word_timestamps=True when available, else falls back to
+    OpenAI Whisper verbose_json word granularity.
+    Returns an empty list if transcription fails.
     """
     if not audio_path.exists():
         return []
     if audio_path.stat().st_size > MAX_WHISPER_BYTES:
         logger.warning("audio too large for Whisper (%d bytes); skipping STT", audio_path.stat().st_size)
         return []
+    # Try faster-whisper local first (word_timestamps=True)
+    try:
+        from faster_whisper import WhisperModel  # type: ignore
+        model_size = os.environ.get("WHISPER_MODEL", "small")
+        model = WhisperModel(model_size, device="cpu", compute_type="int8")
+        segments, info = model.transcribe(str(audio_path), language=language, word_timestamps=True, vad_filter=True)
+        out: list[dict] = []
+        for seg in segments:
+            for w in getattr(seg, "words", []) or []:
+                try:
+                    out.append({"word": str(w.word).strip(), "start": float(w.start), "end": float(w.end)})
+                except Exception:
+                    continue
+        if out:
+            logger.info("faster-whisper transcribed %d words (word_timestamps=True)", len(out))
+            return [w for w in out if w["word"]]
+    except ImportError:
+        pass
+    except Exception as e:  # noqa: BLE001
+        logger.warning("faster-whisper failed: %s — falling back to OpenAI", e)
+
     api_key = os.environ.get("EMERGENT_LLM_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
     if not api_key:
         return []

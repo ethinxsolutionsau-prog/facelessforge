@@ -15,8 +15,8 @@ const PLATFORMS = [
 const TONES = ["calm-authoritative", "curious-expert", "cinematic", "energetic", "mysterious", "warm-narrative"];
 const VOICE_STYLES = ["neutral male narrator", "neutral female narrator", "deep male narrator", "warm female narrator", "young male narrator"];
 const VISUAL_STYLES = ["cinematic b-roll", "moody minimal", "motion graphic heavy", "archival + painterly", "anime-inspired", "stock + text cards"];
-const MONETISATION = ["ads", "ads + affiliate", "affiliate", "digital product", "sponsorship"];
-const CTAS = ["subscribe", "join newsletter", "visit website", "buy product", "book call"];
+const MONETISATION = ["Grow channel to 50k subs", "Sell my product", "Build authority", "ads", "ads + affiliate", "affiliate", "digital product", "sponsorship"];
+const CTAS = ["Visit website", "Subscribe", "Buy product", "subscribe", "join newsletter", "visit website", "buy product", "book call"];
 
 const DURATIONS = [60, 180, 300, 420, 600, 900];
 
@@ -108,9 +108,9 @@ export default function CreateProjectPage() {
               <textarea data-testid="field-topic" value={form.topic} onChange={(e) => update("topic", e.target.value)} rows={3}
                 className={inputClass + " resize-none"} placeholder="What exactly will this video explain?" />
             </Field>
-            <Field label="Target audience" name="audience" errors={errors}>
+            <Field label="Who's watching? ⓘ" name="audience" hint="Who will watch this? This shapes voice + examples" errors={errors}>
               <input data-testid="field-audience" value={form.audience} onChange={(e) => update("audience", e.target.value)}
-                className={inputClass} placeholder="e.g. retail investors 25–45" />
+                className={inputClass} placeholder="e.g. Gen Z tech hobbyists, busy pros" />
             </Field>
           </div>
 
@@ -167,12 +167,12 @@ export default function CreateProjectPage() {
               <span className="font-mono text-[10px] uppercase tracking-widest">Step 3 · Goals</span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Field label="Monetisation intent" name="monetisation_intent" errors={errors}>
+              <Field label="What's the goal? ⓘ" name="monetisation_intent" hint="What do you want this video to do?" errors={errors}>
                 <select data-testid="field-mon" value={form.monetisation_intent} onChange={(e) => update("monetisation_intent", e.target.value)} className={selectClass}>
                   {MONETISATION.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
               </Field>
-              <Field label="CTA goal" name="cta_goal" errors={errors}>
+              <Field label="What should they do? ⓘ" name="cta_goal" hint="Main action you want viewer to take" errors={errors}>
                 <select data-testid="field-cta" value={form.cta_goal} onChange={(e) => update("cta_goal", e.target.value)} className={selectClass}>
                   {CTAS.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>

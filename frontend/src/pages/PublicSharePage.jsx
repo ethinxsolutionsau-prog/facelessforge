@@ -32,18 +32,19 @@ function setCanonical(href) {
 function useShareSocialMeta(data, url) {
   useEffect(() => {
     if (!data) return;
-    const title = data.display_title || data.project_name || "FacelessForge share";
+    const brand = data.branding?.white_label_enabled && data.branding?.brand_name ? data.branding.brand_name : "FacelessForge";
+    const title = data.display_title || data.project_name || `${brand} share`;
     const desc = data.metadata?.description
       ? (data.metadata.description.slice(0, 240) + (data.metadata.description.length > 240 ? "…" : ""))
-      : `Created with FacelessForge · quality ${data.quality_score}/100 · ${data.niche}`;
+      : `Created with ${brand} · quality ${data.quality_score}/100 · ${data.niche}`;
     const image = data.selected_thumbnail_url || `${window.location.origin}/og-share-default.svg`;
     const og = {
-      title: `${title} · FacelessForge`,
+      title: `${title} · ${brand}`,
       description: desc,
       url,
       image,
       type: "article",
-      site: "FacelessForge",
+      site: brand,
     };
 
     const prevTitle = document.title;
@@ -311,6 +312,55 @@ export default function PublicSharePage() {
               </div>
             )}
 
+            {/* MP4 Download + GCS Mirror */}
+            {data.final_video?.url && (
+              <div className="border border-[#00FF66]/20 bg-[#00FF66]/5 rounded-sm p-5 space-y-3" data-testid="share-download-panel">
+                <div className="font-mono text-[10px] uppercase tracking-widest text-[#00FF66]">MP4 Download — Ready</div>
+                <div className="flex flex-wrap gap-2">
+                  <a
+                    data-testid="share-download-mp4"
+                    href={data.final_video.url}
+                    download={`${(display_title || "facelessforge").replace(/[^a-z0-9_-]/gi, "_")}.mp4`}
+                    className="inline-flex items-center gap-2 bg-[#00FF66] text-black font-semibold text-sm px-4 py-2 rounded-sm hover:bg-[#33FF80]"
+                  >
+                    ⬇ Download MP4
+                  </a>
+                  <a
+                    data-testid="share-gcs-mirror"
+                    href={data.download?.gcs_mirror || data.final_video.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 border border-zinc-700 text-white hover:border-[#00E5FF] hover:text-[#00E5FF] font-mono text-[11px] uppercase tracking-widest px-4 py-2 rounded-sm"
+                  >
+                    GCS Mirror (R2) — videos.ethinx.solutions
+                  </a>
+                </div>
+                <div className="font-mono text-[11px] text-zinc-500 break-all">
+                  {data.final_video.url}
+                </div>
+                <div className="font-mono text-[10px] text-zinc-600">
+                  R2 bucket facelessforge-prod · GCS mirror compatible · 1080p H.264/AAC
+                </div>
+              </div>
+            )}
+
+            {/* Posting Guidance */}
+            <div className="border border-[#00E5FF]/20 bg-[#00E5FF]/5 rounded-sm p-5 space-y-3" data-testid="share-posting-guidance">
+              <div className="font-mono text-[10px] uppercase tracking-widest text-[#00E5FF]">Posting Guidance — YouTube / TikTok / Reels</div>
+              <ol className="list-decimal list-inside space-y-1.5 text-sm text-zinc-200">
+                <li>Upload MP4 native — don't re-encode (1080p 30fps H.264/AAC)</li>
+                <li>Title: Copy YouTube title above (&lt;70 chars for CTR)</li>
+                <li>Description: Paste full description + add your company link first line</li>
+                <li>Tags: Copy tags block; add niche hashtag + company name</li>
+                <li>Thumbnail: Download selected thumbnail as custom thumbnail 1280×720</li>
+                <li>Scheduling: Post 10am-2pm local, add chapters, pin comment</li>
+                <li>Shorts/Reels: Crop center 1080×1920 if vertical needed — audio already mixed</li>
+              </ol>
+              <p className="font-mono text-[11px] text-zinc-500">
+                Questions? Reply — support@ethinx.solutions · EthinX Solutions ABN 60 578 933 517
+              </p>
+            </div>
+
             {/* Thumbnail briefs */}
             {thumbnails?.length > 0 && (
               <section>
@@ -344,15 +394,18 @@ export default function PublicSharePage() {
           <div className="flex items-center gap-3">
             <div
               className="w-8 h-8 flex items-center justify-center bg-[#00E5FF] text-black font-black font-mono text-lg"
-              style={{ clipPath: "polygon(0 0, 100% 0, 100% 70%, 85% 100%, 0 100%)" }}
+              style={{ clipPath: "polygon(0 0, 100% 0, 100% 70%, 85% 100%, 0 100%)", background: data.branding?.brand_color || "#00E5FF" }}
             >
-              F
+              {(data.branding?.white_label_enabled && data.branding?.brand_name ? data.branding.brand_name[0] : "F").toUpperCase()}
             </div>
             <div className="leading-tight">
-              <div className="font-semibold tracking-tight">Created with FacelessForge</div>
+              <div className="font-semibold tracking-tight">Created with {data.branding?.white_label_enabled && data.branding?.brand_name ? data.branding.brand_name : "FacelessForge"}</div>
               <div className="font-mono text-[10px] text-zinc-500 tracking-widest uppercase">
-                Turn any idea into a YouTube-ready content package.
+                {data.branding?.white_label_enabled ? `White-label via tenant settings · custom domain ${data.branding?.custom_domain || "—"}` : "Turn any idea into a YouTube-ready content package."}
               </div>
+              {data.branding?.brand_logo_url && data.branding?.white_label_enabled && (
+                <img src={data.branding.brand_logo_url} alt="brand logo" className="h-6 mt-2" />
+              )}
             </div>
           </div>
           <Link

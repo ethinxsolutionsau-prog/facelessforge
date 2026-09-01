@@ -129,3 +129,5 @@ opentelemetry-instrumentation-fastapi==0.57b0
 opentelemetry-instrumentation-httpx==0.57b0
 opentelemetry-api==1.38.0
 opentelemetry-sdk==1.38.0
+apscheduler==3.11.3
+tzlocal==5.4.4

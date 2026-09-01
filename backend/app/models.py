@@ -42,6 +42,7 @@ class ProjectCreate(BaseModel):
     tone: str = Field(min_length=1, max_length=80)
     target_duration: int = Field(ge=30, le=3600)
     voice_style: Optional[str] = "neutral male narrator"
+    voice_id: Optional[str] = None
     visual_style: Optional[str] = "cinematic b-roll"
     monetisation_intent: Optional[str] = "ads + affiliate"
     cta_goal: Optional[str] = "subscribe"
@@ -57,6 +58,7 @@ class ProjectUpdate(BaseModel):
     tone: Optional[str] = None
     target_duration: Optional[int] = None
     voice_style: Optional[str] = None
+    voice_id: Optional[str] = None
     visual_style: Optional[str] = None
     monetisation_intent: Optional[str] = None
     cta_goal: Optional[str] = None
@@ -166,6 +168,12 @@ class ProviderSettingsUpdate(BaseModel):
     default_visual_style: Optional[str] = None
     cost_limit_monthly: Optional[float] = None
     preferred_provider: Optional[str] = None
+    # White-label branding (Advanced plan)
+    brand_name: Optional[str] = Field(default=None, max_length=120)
+    brand_logo_url: Optional[str] = Field(default=None, max_length=500)
+    brand_color: Optional[str] = Field(default=None, max_length=20)
+    white_label_enabled: Optional[bool] = None
+    custom_domain: Optional[str] = Field(default=None, max_length=200)
 
 
 # ---------- Asset ----------
@@ -198,7 +206,7 @@ class StockAttachRequest(BaseModel):
 
 class FindAssetsRequest(BaseModel):
     query: Optional[str] = None
-    media_type: Literal["both", "videos", "photos"] = "both"
+    media_type: Literal["both", "videos", "photos"] = "videos"
     per_page: int = Field(default=12, ge=1, le=40)
 
 
@@ -209,7 +217,7 @@ class AssetStatusUpdate(BaseModel):
 # ---------- Auto-attach / Thumbnail images ----------
 class AutoAttachRequest(BaseModel):
     replace_existing: bool = False
-    media_type: Literal["both", "videos", "photos"] = "both"
+    media_type: Literal["both", "videos", "photos"] = "videos"
 
 
 class GenerateThumbnailImagesRequest(BaseModel):
@@ -218,14 +226,16 @@ class GenerateThumbnailImagesRequest(BaseModel):
 
 # ---------- Voiceover (TTS) ----------
 class GenerateVoiceoverRequest(BaseModel):
-    voice_style: Optional[str] = None  # narrator, energetic, documentary, calm, dramatic, corporate, mysterious
+    voice_style: Optional[str] = None  # narrator preset ("NEUTRAL_MALE_NARRATOR") or style word (calm, energetic, ...)
+    tone: Optional[str] = None  # style/tone word tuning ElevenLabs settings: calm, energetic, dramatic, documentary, corporate, mysterious, narrator
     text_override: Optional[str] = Field(default=None, max_length=5000)
 
 
 # ---------- Render ----------
 class RenderStartRequest(BaseModel):
-    # Server constructs all ffmpeg args; this body intentionally has no codec/args fields.
     force: Optional[bool] = False  # allow concurrent renders if explicitly forced (admin/owner)
+    voice_style: Optional[str] = None  # narrator preset or style (moved from generate-script to render payload)
+    voice_id: Optional[str] = None  # explicit ElevenLabs voice_id (also on projects table, not just scripts)
 
 
 # ---------- Share ----------

@@ -7,6 +7,7 @@ import RenderPreviewCards from "./render/RenderPreviewCards";
 import JobStatusCard from "./render/JobStatusCard";
 import LastTerminalNotice from "./render/LastTerminalNotice";
 import JobHistory from "./render/JobHistory";
+import VoiceStylePicker from "./voiceover/VoiceStylePicker";
 
 const ACTIVE_STATES = new Set(["queued", "validating", "preparing_assets", "rendering"]);
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
@@ -23,7 +24,12 @@ export default function RenderPanel({
   const [activeJob, setActiveJob] = useState(null);
   const [starting, setStarting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [voiceStyle, setVoiceStyle] = useState(project?.voice_style || project?.voice_id || "narrator");
   const pollRef = useRef(null);
+
+  useEffect(() => {
+    if (project?.voice_style || project?.voice_id) setVoiceStyle(project.voice_style || project.voice_id);
+  }, [project?.voice_style, project?.voice_id]);
 
   const refreshAll = async () => {
     try {
@@ -91,7 +97,7 @@ export default function RenderPanel({
   const start = async () => {
     setStarting(true);
     try {
-      const { data } = await api.post(`/projects/${projectId}/render/start`, {});
+      const { data } = await api.post(`/projects/${projectId}/render/start`, { voice_style: voiceStyle, voice_id: voiceStyle });
       setActiveJob(data);
       toast.success("Render queued");
       const jl = await api.get(`/projects/${projectId}/render/jobs`);
@@ -143,6 +149,14 @@ export default function RenderPanel({
   return (
     <div className="space-y-6">
       <PrereqChecklist preflight={preflight} onRefresh={refreshAll} />
+
+      {canEdit && (
+        <div className="border border-zinc-800 bg-[#121212] rounded-sm p-4">
+          <div className="font-mono text-[10px] uppercase tracking-widest text-zinc-500 mb-3">Narrator voice — change until render</div>
+          <VoiceStylePicker value={voiceStyle} onChange={setVoiceStyle} />
+          <p className="font-mono text-[10px] text-zinc-600 mt-2">Voice selector stays enabled right up to the Render button, not locked after Part generation.</p>
+        </div>
+      )}
 
       <RenderPreviewCards
         selectedThumbnail={selectedThumbnail}

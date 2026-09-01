@@ -36,7 +36,12 @@ SILENCE_MIN_DURATION = 2.0      # check b: minimum silence gap to flag
 SILENCE_SKIP_PCT = 0.05          # check b: ignore gaps before 5% runtime
 VOL_SEGMENT_SEC = 10.0           # check c: per-10s volume check
 MAX_VOL_DIFF_DB = 12.0           # check c: max segment-to-segment diff
-SCENE_THRESHOLD = 0.3            # check d: scene-change threshold
+# check d: scene-change threshold. 0.3 (the classic "strong cut" heuristic)
+# under-detects real cuts in low-texture b-roll (e.g. uniform-sky aviation
+# footage scores 0.10-0.22 at hard cuts between distinct sources), failing
+# otherwise-correct renders. 0.15 still rejects static/caption-card videos
+# (scores ~0) while accepting genuine cuts.
+SCENE_THRESHOLD = 0.15           # check d: scene-change threshold
 MIN_CUTS_PER_8S = 1.0            # check d: ≥1 cut per 8s average
 CAPTION_BOTTOM_PCT = 0.15        # check e: bottom strip % for caption check
 CAPTION_VAR_MIN = 30.0           # check e: min variance for text presence
@@ -266,13 +271,13 @@ async def check_c_volume_consistency(video_path: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Check d: Shot-change rate — select='gt(scene,0.3)' count ≥1 per 8s average
+# Check d: Shot-change rate — select='gt(scene,<SCENE_THRESHOLD>)' count ≥1 per 8s average
 # ---------------------------------------------------------------------------
 
 async def check_d_shot_change_rate(video_path: str) -> dict[str, Any]:
     """
     Constitution §6d:
-    ffmpeg select='gt(scene,0.3)' — average ≥1 cut per 8 seconds.
+    ffmpeg select='gt(scene,<SCENE_THRESHOLD>)' — average ≥1 cut per 8 seconds.
     """
     video_dur = await ffprobe_video_duration(video_path)
 

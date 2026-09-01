@@ -262,7 +262,7 @@ export default function ThumbnailPanel({
                 <div className="font-mono text-[10px] uppercase tracking-widest text-zinc-500 mb-2">
                   Concept · {String(i + 1).padStart(2, "0")}
                 </div>
-                <div className="text-2xl font-bold tracking-tight text-white">{b?.thumbnail_title_text || "Untitled concept"}</div>
+                <div className="text-2xl font-bold tracking-tight text-white flex justify-center items-center text-center" style={{display:'flex',justifyContent:'center',alignItems:'center',textAlign:'center'}}>{b?.thumbnail_title_text || "Untitled concept"}</div>
               </div>
 
               <div className="p-5 space-y-3">
@@ -296,14 +296,17 @@ export default function ThumbnailPanel({
                               : "border-zinc-800"
                           }`}
                         >
-                          <div className="aspect-video bg-[#1A1A1A]">
-                            {g.preview_url && (
+                          <div className="aspect-video bg-[#0f141f]">
+                            {g.preview_url ? (
                               <img
                                 src={g.preview_url}
                                 alt={g.name}
                                 className="w-full h-full object-cover"
                                 loading="lazy"
+                                onError={(e)=>{e.currentTarget.src='/fallback-thumb.png'; e.currentTarget.onerror=null;}}
                               />
+                            ) : (
+                              <img src="/fallback-thumb.png" alt="fallback" className="w-full h-full object-cover" />
                             )}
                           </div>
                           <span

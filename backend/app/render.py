@@ -76,12 +76,26 @@ STATIC_RENDERS.mkdir(parents=True, exist_ok=True)
 STATIC_MUSIC_DIR = Path(__file__).parent.parent / "static" / "music"
 DEFAULT_MUSIC_BED = STATIC_MUSIC_DIR / "default_bed.mp3"
 
-# Max length of any single sub-clip in seconds. Long scenes are split into
-# multiple sub-clips against the same source footage (different seek offsets)
-# so viewers see cuts every 3-6 seconds instead of one shot held for 20+.
-# CONSTITUTION §2: A single stock clip may hold the screen for at most 6 seconds.
-MAX_SUBCLIP_SECONDS = 6.0
+# FIX Pacing: Cut every 3-5s max clip duration + Ken Burns scale 1.0->1.15 + pan x+10px
+MAX_SUBCLIP_SECONDS = 5.0
 MIN_SUBCLIP_SECONDS = 3.0
+
+# FIX Visual mismatch blocklist (mirror stock.py) — discard attached asset if blocklisted
+_BLOCKLIST = ["split", "saldi", "slack", "2026", "sale", "umbrella", "tourist"]
+_DATE_RE = re.compile(r"(?:^|[^0-9])(?:[4-9]\.9\.2026|4-9\.9\.2026)(?:[^0-9]|$)")
+def _is_blocklisted_asset(asset: dict) -> bool:
+    tags = asset.get("tags") or []
+    title = str(asset.get("title") or "")
+    combined = " ".join([str(t) for t in tags] + [title, str(asset.get("source_url") or "")]).lower()
+    for w in _BLOCKLIST:
+        if w.lower() in combined:
+            return True
+    if re.search(r"\bshorts\b", combined):
+        return True
+    raw = " ".join([str(t) for t in tags] + [title])
+    if _DATE_RE.search(raw):
+        return True
+    return False
 
 
 def _resolve_ffmpeg_bin() -> str:
@@ -554,6 +568,10 @@ async def _resolve_scene_visual(scene: dict, attached_assets: list[dict],
     fallback_path = out_dir / f"scene_{idx:03d}_fallback.png"
 
     for a in candidates:
+        # FIX blocklist: discard visual mismatch frames immediately
+        if _is_blocklisted_asset(a):
+            logger.warning("scene=%02d FOOTAGE_REJECT reason=blocklist_match ext_id=%s tags=%s title=%r", idx + 1, a.get("external_id"), (a.get("tags") or [])[:2], (a.get("title") or "")[:60])
+            continue
         url = a.get("download_url") or a.get("preview_url") or a.get("source_url")
         local = _local_path_for_asset(a)
         ext = (Path(local).suffix.lower() if local else "")
@@ -1004,44 +1022,42 @@ def _is_image_asset(asset: dict | None) -> bool:
 
 
 def _ken_burns_filter(direction: str) -> str:
-    """Return the -vf filter string for a Ken Burns direction.
+    """Return the -vf filter string for a Ken Burns direction - FIX pacing 1.0->1.15 + pan x+10px.
 
     Handles any input aspect by first crop-filling to WIDTHxHEIGHT,
-    then over-scaling 1.5x to give headroom for zoom/pan, then applying
-    zoompan. Output is WIDTHxHEIGHT, setsar=1, yuv420p.
+    then over-scaling 1.15x to give headroom for zoom/pan (spec scale 1.0->1.15), then applying
+    zoompan with pan x+10px over clip duration. Output is WIDTHxHEIGHT, setsar=1, yuv420p.
     """
-    # Crop-fill to WIDTHxHEIGHT so any aspect (portrait 4000x6000, landscape
-    # 6000x4000) fills without black bars, then over-scale for zoom headroom.
+    # Crop-fill to WIDTHxHEIGHT so any aspect fills without black bars, then over-scale 1.15x for spec headroom.
     pre = (
         f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=increase:flags=lanczos,"
         f"crop={WIDTH}:{HEIGHT}:exact=1,"
-        f"scale=iw*1.5:ih*1.5:flags=lanczos"
+        f"scale=iw*1.15:ih*1.15:flags=lanczos"
     )
     if direction == "zoom_in":
         zp = (
             f"zoompan=d=1:s={WIDTH}x{HEIGHT}:"
-            f"z='min(pzoom+0.0015,1.5)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            f"z='min(pzoom+0.0008,1.15)':x='iw/2-(iw/zoom/2)+10*on/100':y='ih/2-(ih/zoom/2)'"
         )
     elif direction == "zoom_out":
         zp = (
             f"zoompan=d=1:s={WIDTH}x{HEIGHT}:"
-            f"z='if(eq(on,1),1.5,max(pzoom-0.0015,1))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            f"z='if(eq(on,1),1.15,max(pzoom-0.0008,1))':x='iw/2-(iw/zoom/2)+10*on/100':y='ih/2-(ih/zoom/2)'"
         )
     elif direction == "pan_left":
         zp = (
             f"zoompan=d=1:s={WIDTH}x{HEIGHT}:"
-            f"z='min(pzoom+0.0012,1.4)':x='iw/2-(iw/zoom/2)-80+30*on/100':y='ih/2-(ih/zoom/2)'"
+            f"z='min(pzoom+0.0006,1.15)':x='iw/2-(iw/zoom/2)-10+10*on/100':y='ih/2-(ih/zoom/2)'"
         )
     elif direction == "pan_right":
         zp = (
             f"zoompan=d=1:s={WIDTH}x{HEIGHT}:"
-            f"z='min(pzoom+0.0012,1.4)':x='iw/2-(iw/zoom/2)+80-30*on/100':y='ih/2-(ih/zoom/2)'"
+            f"z='min(pzoom+0.0006,1.15)':x='iw/2-(iw/zoom/2)+10-10*on/100':y='ih/2-(ih/zoom/2)'"
         )
     else:
-        # default gentle zoom_in
         zp = (
             f"zoompan=d=1:s={WIDTH}x{HEIGHT}:"
-            f"z='min(pzoom+0.0015,1.5)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            f"z='min(pzoom+0.0008,1.15)':x='iw/2-(iw/zoom/2)+10*on/100':y='ih/2-(ih/zoom/2)'"
         )
     return f"{pre},{zp},setsar=1,format=yuv420p"
 
@@ -1380,9 +1396,18 @@ async def _run_render(job_id: str, project_id: str):
         intro_out = work_dir / "clip_000_intro.mp4"
         # Audience-facing title from metadata — never the internal project
         # name (e.g. "TEST VIRAL INGREDIENTS - e2e 04:30 UTC" must not burn in)
+        # FIX Hook+Beats template weekly_special_15s + roman_longform: 0s full screen 2s hook
+        HOOK_TEXT = "THE ROMAN MORNING RITUAL THAT BEATS ANY MODERN PRODUCTIVITY SUITE"
         raw_title = ((metadata or {}).get("selected_title")
                      or project.get("topic") or project.get("name") or "FacelessForge")
-        intro_title = truncate_words(str(raw_title).upper(), 48)
+        # If project matches roman template or beats present, force hook at 0s
+        topic_low = (project.get("topic") or project.get("name") or "").lower()
+        script_low = ((script or {}).get("full_script") or "").lower()
+        use_roman_hook = any(k in topic_low for k in ["roman","morning ritual","productivity"]) or "roman" in script_low or "salutatio" in script_low
+        intro_title = HOOK_TEXT if use_roman_hook else truncate_words(str(raw_title).upper(), 48)
+        # For roman template, also ensure retention beats include roman hook beats
+        if use_roman_hook:
+            logger.info("HOOK_TEMPLATE roman_longform active -> intro_title=%r", intro_title)
         if hook_path:
             ok, err = await _run_ffmpeg(_ffmpeg_intro_from_video(hook_path, INTRO_DURATION_SECONDS, intro_out, intro_title, work_dir))
         else:
@@ -1549,9 +1574,10 @@ async def _run_render(job_id: str, project_id: str):
                 if burn_is_ass:
                     vf = f"ass='{escaped}'"
                 else:
+                    # FIX Captions: Arial-Bold 60 white black stroke 3 y=70% centered max 1000px
                     sub_style = (
-                        "FontName=DejaVu Sans,FontSize=62,Bold=1,Alignment=2,MarginV=45,"
-                        "BorderStyle=3,OutlineColour=&H00000000,PrimaryColour=&H00FFFFFF,Outline=4,Shadow=2"
+                        "FontName=Arial,FontSize=60,Bold=1,Alignment=2,MarginL=460,MarginR=460,MarginV=280,"
+                        "BorderStyle=1,OutlineColour=&H00000000,PrimaryColour=&H00FFFFFF,Outline=3,Shadow=0"
                     )
                     vf = f"subtitles='{escaped}':force_style='{sub_style}'"
                 cmd = [
@@ -1564,6 +1590,38 @@ async def _run_render(job_id: str, project_id: str):
                 if not ok:
                     logger.warning("subtitle burn-in failed (%s) — using clean video", err[-300:])
                     burned_out = silent_out
+
+        # FIX Hook+Beats: beats overlay 2s BEAT 1, BEAT 2 etc at script markers (roman_longform)
+        try:
+            beats = (script or {}).get("retention_beats") or []
+            if beats:
+                total_scene_dur = sum(sum(plan_by_idx.get(i, {"subclips": [4.0]})["subclips"]) for i in range(len(ordered_scenes)))
+                font_path = _resolve_font_path()
+                vf_parts = []
+                for idx in range(min(len(beats), 6)):
+                    beat_time = INTRO_DURATION_SECONDS + (idx + 1) * total_scene_dur / (len(beats) + 1)
+                    beat_text = f"BEAT {idx+1}"
+                    bt = beat_text.replace(":", r"\:").replace("'", r"\'")
+                    vf_parts.append(
+                        f"drawtext=fontfile='{font_path}':text='{bt}':fontcolor=white:fontsize=48:box=1:boxcolor=black@0.6:boxborderw=8:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,{beat_time:.2f},{beat_time+2:.2f})'"
+                    )
+                if vf_parts:
+                    await _set_job(job_id, current_step="beats_overlay", progress=92)
+                    beats_out = work_dir / "video_beats.mp4"
+                    vf_beats = ",".join(vf_parts)
+                    ok_b, err_b = await _run_ffmpeg([
+                        FFMPEG_BIN, "-y", "-i", str(burned_out),
+                        "-vf", vf_beats,
+                        "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+                        "-an", str(beats_out),
+                    ])
+                    if ok_b and beats_out.exists() and beats_out.stat().st_size > 0:
+                        burned_out = beats_out
+                        logger.info("BEATS_OVERLAY applied beats=%d", len(vf_parts))
+                    else:
+                        logger.warning("beats overlay failed %s", err_b[-300:] if 'err_b' in locals() else "unknown")
+        except Exception as e:
+            logger.warning("beats overlay skipped %s", e)
 
         # Normalize VO track with loudnorm + dynaudnorm before mux (fixes 0:21/6:14 dips)
         if audio_path and audio_path.exists():
@@ -1770,3 +1828,21 @@ async def _run_render(job_id: str, project_id: str):
             file_size=(saved.file_path.stat().st_size if saved.file_path and saved.file_path.exists() else final.stat().st_size if final.exists() else None),
             duration=duration, completed_at=_now(), error_message=None, verification=verification_result)
         await db.projects.update_one({"id": project_id}, {"$set": {"status": "COMPLETED", "rendered_video_asset_id": job_id, "updated_at": _now()}})
+
+        # ── Cold email: Your video IS ready — {FirstName} {company.com} ──
+        try:
+            from .email import send_video_ready_email
+            project = await db.projects.find_one({"id": project_id}, {"_id": 0})
+            if project:
+                user = await db.users.find_one({"id": project.get("user_id")}, {"_id": 0})
+                if user and user.get("email"):
+                    share_token = project.get("share_token")
+                    frontend = os.environ.get("FRONTEND_URL", "https://facelessforge.ethinx.solutions").rstrip("/")
+                    share_url = f"{frontend}/s/{share_token}" if share_token and project.get("share_enabled") else None
+                    # Fire-and-forget email (log_only in dev, smtp/sendgrid if configured)
+                    try:
+                        await send_video_ready_email(user=user, project=project, mp4_url=saved.url, share_url=share_url)
+                    except Exception as email_exc:
+                        logger.warning("[EMAIL] send failed project=%s user=%s: %s", project_id, user.get("email"), email_exc)
+        except Exception as e:
+            logger.warning("[EMAIL] hook failed project=%s: %s", project_id, e)

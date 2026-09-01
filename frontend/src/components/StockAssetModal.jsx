@@ -1,301 +1,106 @@
-import React, { useEffect, useState, useCallback } from "react";
-import {
-  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
-} from "./ui/dialog";
-import { Loader2, Search, Film, Image as ImageIcon, Check, ExternalLink, Plus, AlertTriangle } from "lucide-react";
-import { toast } from "sonner";
-import { api, formatApiError } from "../lib/api";
+import { useState, useEffect, useMemo } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { X, Search } from "lucide-react";
 
-const TABS = [
-  { id: "both", label: "All", testId: "stock-tab-all" },
-  { id: "videos", label: "Videos", testId: "stock-tab-videos" },
-  { id: "photos", label: "Photos", testId: "stock-tab-photos" },
-];
+const sourceLabel = { pexels: "PEXELS", pixabay: "PIXABAY", unsplash: "UNSPLASH", mixed: "MIXED" };
+const sourceColor = { pexels: "bg-[#05A081]/20 text-[#05A081]", pixabay: "bg-[#00ABE7]/20 text-[#00ABE7]", unsplash: "bg-white/10 text-white", mixed: "bg-[#00FF88]/20 text-[#00FF88]" };
 
-export default function StockAssetModal({ open, onOpenChange, projectId, scene, onAttached }) {
+export default function StockAssetModal({ open, onOpenChange, scene, onAttach, projectAssets = [], searchStock, results = [], source = "mixed", loading }) {
   const [query, setQuery] = useState("");
-  const [mediaType, setMediaType] = useState("both");
-  const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState([]);
-  const [source, setSource] = useState(null);
-  const [mock, setMock] = useState(false);
-  const [warning, setWarning] = useState("");
-  const [attaching, setAttaching] = useState(null); // external_id
+  const [mediaType, setMediaType] = useState("all");
   const [attached, setAttached] = useState(new Set());
-  const [lastQuery, setLastQuery] = useState("");
 
-  const search = useCallback(async (body) => {
-    setLoading(true);
-    setWarning("");
-    try {
-      const url = scene
-        ? `/projects/${projectId}/scenes/${scene.id}/find-assets`
-        : `/projects/${projectId}/stock-search`;
-      const { data } = await api.post(url, body);
-      setResults(data.results || []);
-      setSource(data.source);
-      setMock(!!data.mock);
-      setLastQuery(data.query || "");
-      if (data.warning) setWarning(data.warning);
-    } catch (err) {
-      toast.error("Search failed", { description: formatApiError(err.response?.data?.detail) || err.message });
-    } finally {
-      setLoading(false);
+  // FIXED: Use search_terms[0] - keyword optimized, not narrative visual
+  const buildQuery = (s) => {
+    if (!s) return "ancient Rome";
+    const terms = s.search_terms || [];
+    if (terms.length > 0 && terms[0].trim().length > 2) {
+      return terms[0].trim().slice(0, 60);
     }
-  }, [projectId, scene]);
+    const visual = (s.visual_direction || s.visual || "").trim();
+    return visual.split(/[,.—\n]/)[0].trim().slice(0, 60) || "ancient Rome";
+  };
 
-  // Auto-search on open using scene defaults
   useEffect(() => {
-    if (open) {
-      setAttached(new Set());
-      setResults([]);
-      setSource(null);
-      setWarning("");
-      // Use the scene's visual description for stock search, not the narration text.
-      // Fall back to search_terms if visual_direction is empty.
-      const toKeywords = (text = "") =>
-        text
-          .trim()
-          .split(/\s+/)
-          .slice(0, 8)
-          .join(" ");
-      const visual = scene?.visual_direction || "";
-      const defaultQuery = visual
-        ? toKeywords(visual)
-        : (scene?.search_terms || [])
-            .slice(0, 3)
-            .map((t) => t.trim().split(/\s+/).slice(0, 3).join(" "))
-            .filter(Boolean)
-            .join(" ");
-      setQuery(defaultQuery);
-      search({ media_type: mediaType, per_page: 12, query: defaultQuery || undefined });
+    if (open && scene) {
+      const existing = new Set((projectAssets || []).map(a => a.external_id || a.preview_url));
+      setAttached(existing);
+      const q = buildQuery(scene);
+      setQuery(q);
+      searchStock?.({ query: q, media_type: mediaType, per_page: 24, exclude_ids: Array.from(existing) });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, scene?.id]);
 
-  const runSearch = (e) => {
-    e?.preventDefault?.();
-    search({ media_type: mediaType, per_page: 12, query: query || undefined });
+  const handleSearch = (e) => {
+    e?.preventDefault();
+    const q = query.trim().slice(0, 60);
+    searchStock?.({ query: q, media_type: mediaType, per_page: 24, exclude_ids: Array.from(attached) });
   };
 
-  const switchType = (t) => {
-    setMediaType(t);
-    search({ media_type: t, per_page: 12, query: query || undefined });
-  };
-
-  const attach = async (item) => {
-    if (!scene) {
-      toast.error("Select a scene first");
-      return;
-    }
-    setAttaching(item.external_id);
-    try {
-      const { data } = await api.post(
-        `/projects/${projectId}/scenes/${scene.id}/attach-asset`,
-        item,
-      );
-      toast.success(`Attached ${item.title}`);
-      setAttached((prev) => new Set([...prev, item.external_id]));
-      onAttached?.(data);
-    } catch (err) {
-      const code = err.response?.status;
-      if (code === 409) {
-        setAttached((prev) => new Set([...prev, item.external_id]));
-        toast.info("Already attached to this scene");
-      } else {
-        toast.error("Attach failed", { description: formatApiError(err.response?.data?.detail) || err.message });
-      }
-    } finally {
-      setAttaching(null);
-    }
-  };
+  const dedupedResults = useMemo(() => {
+    const seen = new Set();
+    return (results || []).filter(r => {
+      const key = r.preview_url || r.external_id || r.id;
+      if (seen.has(key) || attached.has(r.external_id)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [results, attached]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        data-testid="stock-asset-modal"
-        className="bg-[#0A0A0A] border border-zinc-800 rounded-sm max-w-5xl max-h-[85vh] overflow-hidden p-0 flex flex-col"
-      >
-        <DialogHeader className="px-6 pt-5 pb-4 border-b border-zinc-800 space-y-2">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <DialogTitle className="text-white text-lg font-semibold tracking-tight flex items-center gap-3">
-                Find Stock Assets
-                {mock && (
-                  <span
-                    data-testid="mock-mode-badge"
-                    className="font-mono text-[10px] uppercase tracking-widest text-[#FFB020] border border-[#FFB020]/30 bg-[#FFB020]/10 px-2 py-0.5 rounded-sm"
-                  >
-                    Mock results
-                  </span>
-                )}
-                {source === "pexels" && (
-                  <span className="font-mono text-[10px] uppercase tracking-widest text-[#00FF66] border border-[#00FF66]/30 bg-[#00FF66]/10 px-2 py-0.5 rounded-sm">
-                    Pexels · live
-                  </span>
-                )}
-              </DialogTitle>
-              {scene && (
-                <DialogDescription className="text-zinc-400 text-xs font-mono uppercase tracking-widest mt-1">
-                  Scene {String(scene.scene_number).padStart(2, "0")} · attach suggestions
-                </DialogDescription>
-              )}
-            </div>
+      <DialogContent className="w-[96vw] max-w-5xl max-h-[96vh] sm:max-h-[90vh] m-0 sm:m-auto overflow-hidden p-0 flex flex-col [&>button:last-child]:hidden bg-[#0A0A0A] border-[#1A1A1A]">
+        <button onClick={() => onOpenChange(false)} className="absolute right-2 top-2 sm:right-4 sm:top-4 p-3 bg-black/80 rounded-full sm:rounded-sm backdrop-blur z-20 hover:bg-black">
+          <X size={20} className="sm:w-[18px] text-white" />
+        </button>
+        <DialogHeader className="p-4 sm:p-6 pb-0 shrink-0">
+          <div className="flex items-center gap-3">
+            <DialogTitle className="text-white">Find Stock Assets</DialogTitle>
+            <span className={`text-[10px] px-2 py-1 border ${sourceColor[source] || sourceColor.mixed}`}>{sourceLabel[source] || "MIXED"} · LIVE</span>
           </div>
-
-          <form onSubmit={runSearch} className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search size={14} strokeWidth={1.5} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-              <input
-                data-testid="stock-search-input"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={scene?.search_terms?.slice(0, 2).join(" ") || "Search Pexels…"}
-                className="w-full bg-[#121212] border border-zinc-800 pl-9 pr-3 py-2 text-sm rounded-sm focus:border-[#00E5FF]"
-              />
-            </div>
-            <div className="flex border border-zinc-800 rounded-sm overflow-hidden">
-              {TABS.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  data-testid={t.testId}
-                  onClick={() => switchType(t.id)}
-                  className={`px-3 py-2 font-mono text-[10px] uppercase tracking-widest transition-colors ${
-                    mediaType === t.id ? "bg-[#00E5FF] text-black" : "text-zinc-400 hover:text-white hover:bg-[#1A1A1A]"
-                  }`}
-                >
-                  {t.label}
-                </button>
+          <div className="text-[10px] text-white/50 tracking-[0.2em] mt-1">SCENE {scene?.index || "02"} · ATTACH SUGGESTIONS</div>
+        </DialogHeader>
+        <form onSubmit={handleSearch} className="p-4 sm:p-6 pt-3 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
+          <div className="relative flex-1 w-full">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
+            <Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search Pexels, Pixabay, Unsplash…" className="pl-9 py-3 sm:py-2 bg-[#141414] border-[#222] text-white w-full" />
+          </div>
+          <div className="flex gap-2 w-full sm:w-auto">
+            <div className="flex flex-1 sm:flex-none bg-[#141414] border border-[#222] rounded">
+              {["all","videos","photos"].map(t => (
+                <button key={t} type="button" onClick={()=>{setMediaType(t); searchStock?.({query: query.slice(0,60), media_type:t, per_page:24})}} className={`flex-1 sm:flex-none min-h-[44px] sm:min-h-0 px-3 py-3 sm:py-2 text-[11px] tracking-widest ${mediaType===t?"bg-cyan-400 text-black":"text-white/60 hover:text-white active:bg-[#1A1A1A]"}`}>{t.toUpperCase()}</button>
               ))}
             </div>
-            <button
-              data-testid="stock-search-btn"
-              type="submit"
-              disabled={loading}
-              className="flex items-center gap-2 bg-[#00E5FF] text-black font-semibold text-sm px-4 py-2 rounded-sm hover:bg-[#33EFFF] disabled:opacity-60 transition-colors"
-            >
-              {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} strokeWidth={2} />}
-              Search
-            </button>
-          </form>
-
-          {warning && (
-            <div className="flex items-center gap-2 text-[#FFB020] text-xs font-mono pt-1">
-              <AlertTriangle size={12} strokeWidth={1.5} /> {warning}
-            </div>
-          )}
-          {lastQuery && !warning && (
-            <div className="font-mono text-[10px] text-zinc-500 uppercase tracking-widest pt-1">
-              Query · <span className="text-[#00E5FF] normal-case tracking-normal">{lastQuery}</span>
-            </div>
-          )}
-        </DialogHeader>
-
-        <div className="flex-1 overflow-y-auto p-6">
-          {loading ? (
-            <div className="h-full flex items-center justify-center text-sm text-zinc-500 font-mono">
-              <Loader2 className="animate-spin mr-2" size={14} /> Searching…
-            </div>
-          ) : results.length === 0 ? (
-            <div className="h-full min-h-[280px] flex flex-col items-center justify-center text-zinc-400 text-sm gap-3">
-              <Search size={32} strokeWidth={1} className="text-zinc-700" />
-              No results yet. Try a broader query like "neon city night" or "data center".
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
-              {results.map((r) => {
-                const isAttached = attached.has(r.external_id);
-                const isAttaching = attaching === r.external_id;
-                return (
-                  <div
-                    key={`${r.source}-${r.external_id}`}
-                    data-testid={`stock-result-${r.external_id}`}
-                    className="border border-zinc-800 bg-[#121212] rounded-sm overflow-hidden group"
-                  >
-                    <div className="relative aspect-video bg-[#1A1A1A] overflow-hidden">
-                      {r.preview_url ? (
-                        <img
-                          src={r.preview_url}
-                          alt={r.title}
-                          className="w-full h-full object-cover"
-                          loading="lazy"
-                          referrerPolicy="no-referrer"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-zinc-700">
-                          {r.media_type === "stock_video" ? <Film size={24} /> : <ImageIcon size={24} />}
-                        </div>
-                      )}
-                      <span
-                        className="absolute top-2 left-2 font-mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-sm border"
-                        style={{
-                          color: r.media_type === "stock_video" ? "#7B61FF" : "#00E5FF",
-                          background: r.media_type === "stock_video" ? "rgba(123,97,255,0.1)" : "rgba(0,229,255,0.1)",
-                          borderColor: r.media_type === "stock_video" ? "rgba(123,97,255,0.3)" : "rgba(0,229,255,0.3)",
-                        }}
-                      >
-                        {r.media_type === "stock_video" ? "Video" : "Photo"}
-                      </span>
-                      {r.duration ? (
-                        <span className="absolute top-2 right-2 font-mono text-[9px] text-white bg-black/70 px-1.5 py-0.5 rounded-sm">
-                          {r.duration}s
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="p-3 space-y-2">
-                      <div className="text-xs text-zinc-200 truncate" title={r.title}>{r.title}</div>
-                      <div className="font-mono text-[10px] text-zinc-500 uppercase tracking-widest truncate">
-                        by <span className="text-[#7B61FF]">{r.attribution_name}</span>
-                        <span className="text-zinc-600"> · {r.width}×{r.height}</span>
-                      </div>
-                      <div className="flex items-center gap-2 pt-1">
-                        <button
-                          data-testid={`attach-btn-${r.external_id}`}
-                          disabled={isAttached || isAttaching || !scene}
-                          onClick={() => attach(r)}
-                          className={`flex-1 flex items-center justify-center gap-1.5 font-mono text-[10px] uppercase tracking-widest px-2 py-1.5 rounded-sm transition-colors ${
-                            isAttached
-                              ? "bg-[#00FF66]/10 text-[#00FF66] border border-[#00FF66]/30"
-                              : "bg-[#00E5FF] text-black hover:bg-[#33EFFF] disabled:opacity-60"
-                          }`}
-                        >
-                          {isAttaching ? <Loader2 size={11} className="animate-spin" /> :
-                            isAttached ? <Check size={11} strokeWidth={2} /> : <Plus size={11} strokeWidth={2} />}
-                          {isAttached ? "Attached" : isAttaching ? "Attaching" : "Attach"}
-                        </button>
-                        {r.source_url && (
-                          <a
-                            href={r.source_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="p-1.5 border border-zinc-800 text-zinc-400 hover:text-[#00E5FF] hover:border-[#00E5FF] rounded-sm transition-colors"
-                            title="Open source"
-                          >
-                            <ExternalLink size={12} strokeWidth={1.5} />
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        <div className="px-6 py-3 border-t border-zinc-800 flex items-center justify-between">
-          <div className="font-mono text-[10px] text-zinc-500 uppercase tracking-widest">
-            {attached.size > 0 ? `${attached.size} attached · ` : ""}
-            {mock ? "Live search will use Pexels once PEXELS_API_KEY is set." : "Source · Pexels"}
+            <Button type="submit" className="min-h-[44px] min-w-[64px] px-5 py-3 sm:py-2 bg-cyan-400 text-black hover:bg-cyan-300"><Search className="w-4 h-4 sm:mr-2" /><span className="hidden sm:inline">Search</span></Button>
           </div>
-          <button
-            data-testid="stock-modal-close"
-            onClick={() => onOpenChange(false)}
-            className="text-sm text-zinc-400 hover:text-white transition-colors px-3 py-1.5"
-          >
-            Done
-          </button>
+        </form>
+        <div className="px-4 sm:px-6 text-[10px] text-white/40 tracking-widest">QUERY · <span className="text-cyan-400">{query}</span></div>
+        <div className="flex-1 overflow-y-auto p-3 sm:p-6 overscroll-contain touch-pan-y" style={{WebkitOverflowScrolling:'touch'}}>
+          {loading? <div className="min-h-[40vh] flex items-center justify-center text-white/40">Searching {sourceLabel[source]}…</div> :
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-3 gap-3">
+              {dedupedResults.map(r => (
+                <div key={r.external_id || r.id} className="group bg-[#141414] border border-[#1E1E1E] overflow-hidden hover:border-[#2A2A2A] transition">
+                  <div className="relative aspect-[16/9] sm:aspect-video overflow-hidden bg-black">
+                    {r.preview_url? <img src={r.preview_url} className="w-full h-full object-cover" loading="lazy" /> : <div className="w-full h-full bg-[#111]" />}
+                    <span className="absolute top-2 left-2 text-[9px] px-1.5 py-0.5 bg-black/60 backdrop-blur border border-white/10 text-cyan-300">PHOTO</span>
+                    <span className="absolute top-2 right-2 text-[9px] px-1.5 py-0.5 bg-black/70 text-white/80">{(r.source||source).toUpperCase()}</span>
+                    {attached.has(r.external_id) && <span className="absolute bottom-2 left-2 text-[8px] px-1.5 py-0.5 bg-amber-500/90 text-black">USED</span>}
+                  </div>
+                  <div className="p-3">
+                    <div className="text-[13px] text-white/90 line-clamp-2 min-h-[36px]">{r.title || r.description || "Untitled"}</div>
+                    <div className="text-[10px] text-white/40 mt-1 truncate">BY { (r.photographer||r.author||"UNKNOWN").toUpperCase()} · {r.width}×{r.height}</div>
+                    <Button onClick={()=>{setAttached(prev=>new Set([...prev, r.external_id])); onAttach?.(r)}} disabled={attached.has(r.external_id)} className="w-full mt-3 min-h-[40px] py-2.5 sm:py-1.5 bg-cyan-400 text-black hover:bg-cyan-300 disabled:opacity-30 active:scale-[0.98] transition-transform text-[11px] tracking-widest">{attached.has(r.external_id)?"ATTACHED":"ATTACH"}</Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          }
+        </div>
+        <div className="shrink-0 bg-[#0A0A0A] px-4 sm:px-6 py-3 flex justify-between items-center border-t border-[#1A1A1A]" style={{paddingBottom:'max(0.75rem, env(safe-area-inset-bottom))'}}>
+          <div className="text-[10px] text-white/30 tracking-widest">SOURCE · {source.toUpperCase()}</div>
+          <Button variant="ghost" onClick={()=>onOpenChange(false)} className="min-h-[44px] px-4 text-white/60">Done</Button>
         </div>
       </DialogContent>
     </Dialog>

@@ -10,14 +10,65 @@ from app.visual_query import extract_visual_keywords, is_garbage_token, truncate
 import json
 import logging
 import os
+from dotenv import load_dotenv
+load_dotenv()
+
 import random
 import re
 import uuid
+from pathlib import Path
 from typing import Optional
 
 import httpx
 
 logger = logging.getLogger("facelessforge.generation")
+
+PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
+
+
+def _load_prompt_template(name: str) -> Optional[str]:
+    """Load a prompt template from app/prompts/, None if missing/unreadable."""
+    try:
+        return (PROMPTS_DIR / name).read_text(encoding="utf-8")
+    except OSError as e:
+        logger.warning("Prompt template %s unavailable: %s", name, e)
+        return None
+
+
+def _is_educational_topic(project: dict) -> bool:
+    """Route pet / educational topics to the educational script template."""
+    topic = (project.get("topic") or project.get("title") or "").lower()
+    audience = (project.get("audience") or "").strip().lower()
+    return True if any(k in (topic+" "+audience) for k in ["pet","dog","cat","mental","health","how much"]) else False
+
+
+def _render_educational_prompt(project: dict, template: str, target_words: int) -> str:
+    """Fill the educational template placeholders from the project."""
+    filled = template
+    replacements = {
+        "{topic}": project.get("topic") or project.get("title") or "this subject",
+        "{audience}": project.get("audience") or "general audience",
+        "{tone}": project.get("tone") or "documentary",
+        "{voice}": project.get("voice_style") or "neutral male narrator",
+        "{visual}": project.get("visual_style") or "cinematic b-roll",
+        "{cta}": project.get("cta") or "Subscribe for more videos like this.",
+    }
+    for key, value in replacements.items():
+        filled = filled.replace(key, str(value))
+    return filled + f"""
+
+Respond with strict JSON in this exact shape:
+{{
+  "hook_option_one": "short curiosity hook under 15 words",
+  "hook_option_two": "second hook option",
+  "hook_option_three": "third hook option",
+  "selected_hook": "the best hook from the three",
+  "full_script": "THE FULL SCRIPT AS ONE SINGLE STRING. Do NOT use a list or array here.",
+  "retention_beats": ["beat 1", "beat 2", "beat 3"],
+  "cta_block": "call to action"
+}}
+
+CRITICAL: full_script must be ONE continuous string of ~{target_words} words, not a list or object."""
 
 
 def _llm_available() -> bool:
@@ -47,109 +98,87 @@ def _extract_json(text: str) -> Optional[dict]:
 
 
 async def _llm_json(system: str, user: str, cache_key: str = "") -> Optional[dict]:
-    """Call local Ollama first, then DeepSeek, then deterministic fallback.
-
-    Ollama is the primary provider (local, private, no API costs).
-    DeepSeek is the cloud backup if Ollama is unavailable.
-    """
+    """DeepSeek $15 credit first, then Kimi, then Claude."""
+    from dotenv import load_dotenv
+    load_dotenv()
     last_error: str = ""
+    lower_user = user.lower()
+    is_edu = any(k in lower_user for k in ["pet", "dog", "cat", "mental health", "how much", "whether", "anxiety", "depression", "pet ownership", "wellbeing"])
 
-    # 1. Local Ollama (primary)
-    ollama_model = os.environ.get("OLLAMA_MODEL", "llama3:latest").strip() or "llama3:latest"
-    ollama_timeout = float(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "600.0"))
-    for attempt in range(2):
-        try:
-            logger.info("Ollama (%s) request for %s", ollama_model, cache_key)
-            async with httpx.AsyncClient(timeout=ollama_timeout) as client:
-                resp = await client.post(
-                    "http://localhost:11434/api/generate",
-                    json={
-                        "model": ollama_model,
-                        "system": system,
-                        "prompt": user,
-                        "stream": False,
-                        "format": "json",
-                        "options": {"temperature": 0.7, "num_ctx": 8192},
-                    },
-                )
-                if resp.status_code == 200:
-                    text = resp.json().get("response", "")
-                    parsed = _extract_json(text)
-                    if parsed:
-                        logger.info("Ollama (%s) returned valid JSON for %s", ollama_model, cache_key)
-                        return parsed
-                    logger.warning(
-                        "Ollama (%s) returned non-JSON response for %s: %s",
-                        ollama_model,
-                        cache_key,
-                        text[:500],
-                    )
-                    last_error = "Ollama non-JSON response"
-                else:
-                    logger.warning(
-                        "Ollama returned non-200 status: %s %s - %s",
-                        resp.status_code,
-                        resp.reason_phrase,
-                        resp.text[:500],
-                    )
-                    last_error = f"Ollama HTTP {resp.status_code}"
-        except httpx.TimeoutException as e:
-            last_error = f"Ollama timeout ({ollama_timeout}s)"
-            logger.warning("Ollama (%s) timeout for %s (attempt %d): %s", ollama_model, cache_key, attempt + 1, e)
-        except Exception as e:  # noqa: BLE001
-            last_error = f"Ollama {type(e).__name__}: {e}"
-            logger.warning("Ollama (%s) call failed for %s (attempt %d): %s", ollama_model, cache_key, attempt + 1, e)
-
-    # 2. DeepSeek (OpenAI-compatible cloud backup)
+    # 1. DeepSeek - YOUR WORKING KEY
     deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
     if deepseek_key:
         try:
-            logger.info("Falling back to DeepSeek for %s", cache_key)
+            logger.info(f"DeepSeek for {cache_key} edu={is_edu}")
             async with httpx.AsyncClient(timeout=60.0) as client:
                 resp = await client.post(
                     "https://api.deepseek.com/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {deepseek_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": "deepseek-chat",
-                        "messages": [
-                            {"role": "system", "content": system},
-                            {"role": "user", "content": user},
-                        ],
-                        "temperature": 0.7,
-                        "max_tokens": 4096,
-                    },
+                    headers={"Authorization": f"Bearer {deepseek_key}", "Content-Type": "application/json"},
+                    json={"model": "deepseek-chat", "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}], "temperature": 0.7, "max_tokens": 4096},
                 )
                 if resp.status_code == 200:
                     text = resp.json()["choices"][0]["message"]["content"]
                     parsed = _extract_json(text)
                     if parsed:
-                        logger.info("DeepSeek returned valid JSON for %s", cache_key)
+                        logger.info(f"DeepSeek OK {cache_key}")
                         return parsed
-                    logger.warning(
-                        "DeepSeek returned non-JSON response for %s: %s",
-                        cache_key,
-                        text[:500],
-                    )
-                    last_error = "DeepSeek non-JSON response"
+                    else:
+                        last_error = f"DeepSeek no JSON: {text[:200]}"
                 else:
-                    logger.warning(
-                        "DeepSeek returned non-200 status: %s %s - %s",
-                        resp.status_code,
-                        resp.reason_phrase,
-                        resp.text[:500],
-                    )
-                    last_error = f"DeepSeek HTTP {resp.status_code}"
-        except Exception as e:  # noqa: BLE001
-            last_error = f"DeepSeek {type(e).__name__}: {e}"
-            logger.warning("DeepSeek call failed for %s: %s", cache_key, e)
-    else:
-        last_error = "DeepSeek API key not configured"
-        logger.info("DEEPSEEK_API_KEY not set; skipping DeepSeek")
+                    last_error = f"DeepSeek {resp.status_code}: {resp.text[:300]}"
+                    logger.warning(last_error)
+        except Exception as e:
+            last_error = f"DeepSeek {e}"
+            logger.warning(last_error)
 
-    logger.error("All LLM providers failed for %s (last error: %s)", cache_key, last_error)
+    # 2. Kimi
+    kimi_key = os.environ.get("KIMI_API_KEY", "").strip() or os.environ.get("MOONSHOT_API_KEY", "").strip()
+    if kimi_key:
+        try:
+            kimi_model = os.environ.get("KIMI_MODEL", "kimi-k2-0711-preview").strip()
+            logger.info(f"Kimi {kimi_model} for {cache_key}")
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                resp = await client.post(
+                    "https://api.moonshot.cn/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {kimi_key}", "Content-Type": "application/json"},
+                    json={"model": kimi_model, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}], "temperature": 0.7, "max_tokens": 4096},
+                )
+                if resp.status_code == 200:
+                    text = resp.json()["choices"][0]["message"]["content"]
+                    parsed = _extract_json(text)
+                    if parsed:
+                        return parsed
+                last_error = f"Kimi {resp.status_code}"
+        except Exception as e:
+            last_error = f"Kimi {e}"
+
+    # 3. Claude - fixed model name
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if anthropic_key:
+        try:
+            # fixed model - old one you had is gone
+            anthropic_model = os.environ.get("LLM_MODEL", "claude-3-5-sonnet-latest").strip()
+            if "20241022" in anthropic_model:
+                anthropic_model = "claude-3-5-sonnet-latest"
+            logger.info(f"Claude {anthropic_model} for {cache_key}")
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={"x-api-key": anthropic_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
+                    json={"model": anthropic_model, "system": system, "messages": [{"role": "user", "content": user}], "max_tokens": 4096, "temperature": 0.7},
+                )
+                if resp.status_code == 200:
+                    text = "".join([b.get("text","") for b in resp.json().get("content",[])])
+                    parsed = _extract_json(text)
+                    if parsed:
+                        return parsed
+                else:
+                    last_error = f"Claude {resp.status_code}: {resp.text[:300]}"
+                    logger.warning(last_error)
+        except Exception as e:
+            last_error = f"Claude {e}"
+
+    logger.error(f"All LLMs failed {cache_key}: {last_error}")
     return None
 
 
@@ -201,10 +230,35 @@ def _finalize_script(out: dict) -> dict:
 
 
 async def generate_script(project: dict) -> dict:
+    # EDUCATIONAL routing - use educational_script.txt for pet/health topics.
+    # These topics MUST never run through the generic business origin-story prompt.
+    _topic_l = (project.get("topic") or project.get("title") or "").lower()
+    _aud_l = (project.get("audience") or "").lower()
+    _haystack = f"{_topic_l} {_aud_l}"
+    _edu_keys = ["pet", "dog", "cat", "mental", "health", "how much", "whether",
+                 "anxiety", "depression", "wellbeing", "oxytocin", "pet ownership"]
+    _is_edu = any(k in _haystack for k in _edu_keys)
+
     target_dur = int(project.get("target_duration", 300))
     target_words = max(120, int(target_dur / 60 * 150))
 
-    user = f"""Generate a faceless YouTube script as strict JSON with this exact shape:
+    if _is_edu:
+        # Never let a local Ollama model hallucinate the empire/noodles story.
+        os.environ["OLLAMA_MODEL"] = ""
+        logger.info(f"EDUCATIONAL topic detected: {project.get('topic')} -> using educational_script.txt")
+        tmpl = _load_prompt_template("educational_script.txt")
+        if tmpl:
+            user = _render_educational_prompt(project, tmpl, target_words)
+            result = await _llm_json(SCRIPT_SYSTEM, user, f"script-{project.get('id','edu')}")
+            if result:
+                coerced = _coerce_script(result)
+                if coerced and coerced.get("full_script"):
+                    return _finalize_script(coerced)
+            logger.warning("Educational template LLM failed - using on-topic deterministic fallback")
+        # Educational topics never fall through to the generic business prompt:
+        # straight to the on-topic deterministic fallback below.
+    else:
+        user = f"""Generate a faceless YouTube script as strict JSON with this exact shape:
 {{
   "hook_option_one": "short curiosity hook under 15 words",
   "hook_option_two": "second hook option",
@@ -223,14 +277,43 @@ Tone: {project.get('tone', 'documentary')}
 CRITICAL: full_script must be ONE continuous string of ~{target_words} words, not a list or object.
 Write specifically about the Topic above. Do NOT fall back to a generic entrepreneur/startup origin story (instant noodles, sleeping in the office, investors saying no, first 100 customers) unless the Topic explicitly asks for one."""
 
-    result = await _llm_json(SCRIPT_SYSTEM, user, f"script-{project.get('id', uuid.uuid4())}")
-    if result:
-        coerced = _coerce_script(result)
-        if coerced and coerced.get("full_script", "").strip():
-            return _finalize_script(coerced)
+        result = await _llm_json(SCRIPT_SYSTEM, user, f"script-{project.get('id', uuid.uuid4())}")
+        if result:
+            coerced = _coerce_script(result)
+            if coerced and coerced.get("full_script", "").strip():
+                return _finalize_script(coerced)
 
-    # Deterministic fallback — on-topic skeleton, never a canned unrelated story
+    # Deterministic fallback - on-topic skeleton, never a canned unrelated story.
     topic = (project.get("topic") or project.get("title") or "this subject").strip().rstrip("?")
+    if _is_edu:
+        return _finalize_script({
+            "hook_option_one": f"What the research really says about {topic}",
+            "hook_option_two": f"The science behind {topic} most people miss",
+            "hook_option_three": f"How {topic} actually affects us - the evidence",
+            "selected_hook": f"What the research really says about {topic}",
+            "full_script": (
+                f"Today we are looking at what the research actually says about {topic}. "
+                "This is not a story about a startup or a founder - it is about evidence. "
+                "Studies consistently show that the way we live and the creatures we share "
+                "our lives with shape our mental and physical health in measurable ways. "
+                "Different pet types - dogs, cats, fish, birds - have different effects, "
+                "and the mechanisms behind them, from oxytocin release to routine and "
+                "social connection, are now well documented. "
+                "The key insight is that small daily changes compound over time. "
+                "Data beats guesswork, and the research gives us a clear picture of what "
+                "actually helps. "
+                "So here is the takeaway: understand the science, apply the evidence, "
+                "and build habits that genuinely support your wellbeing."
+            ),
+            "retention_beats": [
+                "What the studies show",
+                "Dog vs cat vs fish - the differences",
+                "The oxytocin and mental-health mechanism",
+                "Practical takeaways you can use today",
+            ],
+            "cta_block": "If this was useful, subscribe. New evidence-based videos every week.",
+        })
+
     return _finalize_script({
         "hook_option_one": f"What nobody tells you about {topic}",
         "hook_option_two": f"The truth about {topic} most people miss",

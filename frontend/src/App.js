@@ -5,6 +5,31 @@ import "@/App.css";
 
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
+
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error("FacelessForge ErrorBoundary caught", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-[#0A0A0A] text-zinc-300 flex flex-col items-center justify-center p-8 font-mono text-sm">
+          <h2 className="text-red-400 text-lg mb-2">Something went wrong</h2>
+          <p className="text-zinc-500 text-xs max-w-md text-center mb-4">{String(this.state.error?.message || this.state.error || "Unknown error")}</p>
+          <button onClick={() => this.setState({ hasError: false, error: null })} className="border border-zinc-700 text-white px-4 py-1 text-xs hover:border-[#00E5FF] hover:text-[#00E5FF]">Try again</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 import LandingPage from "@/pages/LandingPage";
 import LoginPage from "@/pages/LoginPage";
 import RegisterPage from "@/pages/RegisterPage";
@@ -22,18 +47,44 @@ import AdminDiagnosticsPage from "@/pages/AdminDiagnosticsPage";
 import PublicSharePage from "@/pages/PublicSharePage";
 import ForgotPasswordPage from "@/pages/ForgotPasswordPage";
 import ResetPasswordPage from "@/pages/ResetPasswordPage";
+import PricingPage from "@/pages/PricingPage";
+import AutomationPage from "@/pages/AutomationPage";
+
+function WaitlistGate({ children }) {
+  const hasInvite = typeof window !== "undefined" && !!localStorage.getItem("forge_invite");
+  if (!hasInvite) return <Navigate to="/" replace />;
+  return children;
+}
 
 function Protected({ children, adminOnly = false }) {
   const { user } = useAuth();
+  // handle ?invite=FORGE on any /app route — sets localStorage before gate check
+  if (typeof window !== "undefined") {
+    const params = new URLSearchParams(window.location.search);
+    const invite = params.get("invite");
+    if (invite && invite.toUpperCase() === "FORGE") {
+      localStorage.setItem("forge_invite", "FORGE");
+      // clean url
+      params.delete("invite");
+      const clean = window.location.pathname + (params.toString() ? `?${params.toString()}` : "") + window.location.hash;
+      window.history.replaceState({}, "", clean);
+    }
+  }
   if (user === null) {
     return (
-      <div className="min-h-screen bg-[#0A0A0A] text-zinc-500 font-mono text-sm flex items-center justify-center">
+      <div className="min-h-screen bg-[#0f141f] text-slate-500 font-mono text-sm flex items-center justify-center">
         Loading…
       </div>
     );
   }
   if (!user) return <Navigate to="/login" replace />;
   if (adminOnly && user.role !== "admin") return <Navigate to="/app" replace />;
+  // waitlist gate for /app — strict per task, but allow bypass if REACT_APP_DISABLE_WAITLIST=true
+  const disableGate = process.env.REACT_APP_DISABLE_WAITLIST === "true";
+  const hasInvite = typeof window !== "undefined" && !!localStorage.getItem("forge_invite");
+  if (!disableGate && !hasInvite && typeof window !== "undefined" && window.location.pathname.startsWith("/app")) {
+    return <Navigate to="/" replace />;
+  }
   return children;
 }
 
@@ -56,6 +107,7 @@ export default function App() {
       <AuthProvider>
         <ConfirmProvider>
           <BrowserRouter>
+          <ErrorBoundary>
           <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/s/:token" element={<PublicSharePage />} />
@@ -74,9 +126,15 @@ export default function App() {
             <Route path="/app/assets" element={<Protected><AssetLibraryPage /></Protected>} />
             <Route path="/app/admin/users" element={<Protected adminOnly><AdminUsersPage /></Protected>} />
             <Route path="/app/admin/diagnostics" element={<Protected adminOnly><AdminDiagnosticsPage /></Protected>} />
+            <Route path="/pricing" element={<PricingPage />} />
+            <Route path="/app/pricing" element={<Protected><PricingPage /></Protected>} />
+            <Route path="/app/automation" element={<Protected><AutomationPage /></Protected>} />
+            <Route path="/billing" element={<Navigate to="/pricing" replace />} />
+            <Route path="/app/billing" element={<Navigate to="/pricing" replace />} />
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          </ErrorBoundary>
           <Toaster
             theme="dark"
             position="top-right"

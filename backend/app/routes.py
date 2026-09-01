@@ -4,12 +4,15 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import math
+import re
 import os
 import uuid
 import zipfile
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Body
 from fastapi.responses import StreamingResponse, PlainTextResponse
 
@@ -26,6 +29,16 @@ from .models import (
     StockAttachRequest, FindAssetsRequest, AssetStatusUpdate,
     AutoAttachRequest, GenerateThumbnailImagesRequest,
 )
+try:
+    from .billing import check_credits
+except Exception:
+    check_credits = None
+try:
+    from app.billing import check_credits as _cc2
+    if check_credits is None:
+        check_credits = _cc2
+except Exception:
+    pass
 from .scoring import quality_score, quality_label, compute_project_status, scenes_to_csv
 from . import generation as gen
 from . import stock as stock_service
@@ -89,42 +102,46 @@ def _extract_core_query(scene: dict) -> str:
     return "nature cinematic"
 
 def _build_scene_stock_query(scene: dict, project: dict, override: str | None = None) -> str:
-    """Return full Visual + cinematic suffix, preserving commas and detail.
-    FIX v2.7: Preserves full Visual field including comma-separated detail,
-    appends "4k slow motion b-roll cinematic", no truncation, no single-word leaks.
-    Priority: explicit override > full visual_direction + cinematic > search_terms core + cinematic > project topic.
+    """Do NOT truncate query server-side. Use full body.query or scene.search_terms joined.
+
+    FIX: was using visual_direction sliced to 8 words / cinematic suffix only.
+    Now prefers full search_terms joined (first 3 terms) preserving full intent,
+    else visual trimmed to 120 chars, else project topic.
+    Priority: explicit override > search_terms (first 3) > visual (120 chars) > project topic.
     """
     if override and override.strip():
         return override.strip()
-    visual = _clean_visual_full(scene.get("visual_direction") or "")
-    if visual:
-        # Preserve full visual, not just first 6 words
-        # Validate no leak single-word query
-        if len(visual.split()) >= 2:
-            return f"{visual} {CINEMATIC_SUFFIX}".strip()
     terms = scene.get("search_terms") or []
     if terms:
-        # Use first multi-word term, not single-word leaks like "small", "imagine"
+        cleaned: list[str] = []
         for t in terms:
-            clean = " ".join(str(t or "").split()).strip()
-            if not clean:
+            c = " ".join(str(t or "").split()).strip()
+            if not c:
                 continue
-            if len(clean.split()) == 1 and clean.lower() in _SCENE_LEAK_STOP:
+            # Skip single-word leak artifacts like "make", "small", "imagine"
+            if len(c.split()) == 1 and c.lower() in _SCENE_LEAK_STOP:
                 continue
-            if len(clean.split()) == 1 and len(clean) < 4:
+            if len(c.split()) == 1 and len(c) < 4:
                 continue
-            if len(clean.split()) >= 2:
-                return f"{clean} {CINEMATIC_SUFFIX}".strip()
-        # Fallback if only single-word terms remain, construct core
-        core = _extract_core_query(scene)
-        if core and len(core.split()) >= 2:
-            return f"{core} {CINEMATIC_SUFFIX}".strip()
+            cleaned.append(c)
+            if len(cleaned) >= 3:
+                break
+        if cleaned:
+            return " ".join(cleaned)
+        # Fallback: raw first 3 terms if filtering removed all
+        raw = [str(t).strip() for t in terms if str(t).strip()][:3]
+        if raw:
+            return " ".join(raw)
+    visual = _clean_visual_full(scene.get("visual_direction") or "")
+    if visual:
+        # Frontend uses visual.trim().slice(0,120) — mirror here, no 8-word truncation
+        return visual.strip()[:120].strip()
     # Fallback to project topic
     base = (project.get("topic") or project.get("niche") or "stock").strip()
     base = " ".join(base.split())
     if len(base.split()) < 2:
         base = "nature cinematic"
-    return f"{base} {CINEMATIC_SUFFIX}".strip()
+    return base.strip()
 
 def _build_ordered_stock_queries(scene: dict, project: dict) -> list[dict]:
     """Generate exactly 3 ordered query objects per scene: pexels_video (cinematic full), pixabay_video (shorter core), unsplash_image (shortest).
@@ -480,6 +497,8 @@ def _log_cost(db, project_id: str, operation: str, tokens: int, cost: float):
 
 @router.post("/projects/{project_id}/generate-script")
 async def generate_script_endpoint(project_id: str, user=Depends(get_current_user)):
+    if check_credits:
+        await check_credits(user, required=1)
     db = get_db()
     project = await db.projects.find_one({"id": project_id}, {"_id": 0})
     _ensure_project_access(project, user, write=True)
@@ -499,6 +518,8 @@ async def generate_script_endpoint(project_id: str, user=Depends(get_current_use
 
 @router.post("/projects/{project_id}/generate-scenes")
 async def generate_scenes_endpoint(project_id: str, user=Depends(get_current_user)):
+    if check_credits:
+        await check_credits(user, required=1)
     db = get_db()
     project = await db.projects.find_one({"id": project_id}, {"_id": 0})
     _ensure_project_access(project, user, write=True)
@@ -594,6 +615,8 @@ async def generate_scenes_shim(request: Request):
 
 @router.post("/projects/{project_id}/generate-metadata")
 async def generate_metadata_endpoint(project_id: str, user=Depends(get_current_user)):
+    if check_credits:
+        await check_credits(user, required=1)
     db = get_db()
     project = await db.projects.find_one({"id": project_id}, {"_id": 0})
     _ensure_project_access(project, user, write=True)
@@ -795,6 +818,9 @@ async def update_asset_status(project_id: str, asset_id: str, body: AssetStatusU
 @router.get("/stock/meta")
 async def stock_meta(user=Depends(get_current_user)):
     """Lightweight endpoint so the UI can show 'mock mode' badge without triggering a search."""
+    # Use aggregated mock check — true only if all keys missing or flag set
+    if hasattr(stock_service, "is_mock_mode_aggregated"):
+        return {"mock": stock_service.is_mock_mode_aggregated()}
     return {"mock": stock_service.is_mock_mode()}
 
 
@@ -849,13 +875,16 @@ async def stock_search(
 
 @router.post("/projects/{project_id}/stock-search")
 async def project_stock_search(project_id: str, body: FindAssetsRequest, user=Depends(get_current_user)):
-    """Ad-hoc stock search scoped to a project (no scene context)."""
+    """Ad-hoc stock search scoped to a project (no scene context). Aggregated Pexels+Pixabay+Unsplash."""
     db = get_db()
     project = await db.projects.find_one({"id": project_id}, {"_id": 0})
     _ensure_project_access(project, user)
     query = (body.query or project.get("topic") or project.get("niche") or "").strip()
     if not query:
         raise HTTPException(status_code=400, detail="Provide a query or ensure project has a topic.")
+    # Aggregated multi-source — do NOT truncate query server-side, use full body.query
+    if hasattr(stock_service, "search_stock_aggregated"):
+        return await stock_service.search_stock_aggregated(query, body.media_type, body.per_page)
     return await stock_service.search_stock(query, body.media_type, body.per_page)
 
 
@@ -869,7 +898,11 @@ async def find_scene_assets(project_id: str, scene_id: str, body: FindAssetsRequ
         raise HTTPException(status_code=404, detail="Scene not found")
 
     query = _build_scene_stock_query(scene, project, body.query)
-    return await stock_service.search_stock(query, body.media_type, body.per_page)
+    # Fix stock video type param: scene visuals must be videos, not images
+    media_type = body.media_type if body.media_type in ("videos","photos") else "videos"
+    if hasattr(stock_service, "search_stock_aggregated"):
+        return await stock_service.search_stock_aggregated(query, media_type, body.per_page)
+    return await stock_service.search_stock(query, media_type, body.per_page)
 
 
 @router.post("/projects/{project_id}/scenes/{scene_id}/attach-asset")
@@ -925,13 +958,74 @@ async def attach_scene_asset(project_id: str, scene_id: str, body: StockAttachRe
     return _ser(doc)
 
 
-# ---- Auto-attach top result per scene ----
+# ---- Auto-attach 3-second rule: 10 assets per 30s scene ----
+
+def _parse_time_to_seconds(t: str) -> float:
+    """Parse 0:00, 0:30, 1:30, 00:01:30 to seconds."""
+    t = (t or "").strip()
+    if not t:
+        return 0.0
+    parts = t.strip().split(":")
+    try:
+        parts = [float(p.strip()) for p in parts if p.strip() != ""]
+        if len(parts) == 3:
+            return parts[0] * 3600 + parts[1] * 60 + parts[2]
+        if len(parts) == 2:
+            return parts[0] * 60 + parts[1]
+        if len(parts) == 1:
+            return float(parts[0])
+    except Exception:
+        return 0.0
+    return 0.0
+
+def _get_scene_duration(scene: dict) -> float:
+    """Parse duration from scene.duration or start_time/end_time or scene.time '0:00 -> 0:30'."""
+    try:
+        if scene.get("duration") is not None:
+            d = float(scene.get("duration") or 0)
+            if d > 0:
+                return d
+        if scene.get("end_time") is not None and scene.get("start_time") is not None:
+            try:
+                end = float(scene.get("end_time") or 0)
+                start = float(scene.get("start_time") or 0)
+                if end > start:
+                    return end - start
+            except Exception:
+                pass
+        t = scene.get("time") or scene.get("timestamp") or ""
+        if isinstance(t, str) and "->" in t:
+            left, right = t.split("->", 1)
+            s = _parse_time_to_seconds(left.strip())
+            e = _parse_time_to_seconds(right.strip())
+            if e > s:
+                return e - s
+            if e > 0:
+                return e
+        # fallback to string duration like "30s"
+        for k in ("duration", "length", "time"):
+            v = scene.get(k)
+            if isinstance(v, (int, float)) and v > 0:
+                return float(v)
+    except Exception:
+        pass
+    return 30.0
+
+def _dedup_by_preview(results: list[dict]) -> list[dict]:
+    seen = set()
+    out = []
+    for r in results:
+        k = r.get("preview_url") or r.get("external_id") or r.get("id")
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        out.append(r)
+    return out
 
 @router.post("/projects/{project_id}/auto-attach-assets")
 async def auto_attach_assets(project_id: str, body: AutoAttachRequest, user=Depends(get_current_user)):
-    """Iterate scenes and attach the top stock result per scene.
-    Skips scenes that already have stock assets unless replace_existing=true.
-    """
+    """3-second rule: ceil(duration/3) assets per scene (10 for 30s), 3s each, order/start_offset."""
+
     db = get_db()
     project = await db.projects.find_one({"id": project_id}, {"_id": 0})
     _ensure_project_access(project, user, write=True)
@@ -948,143 +1042,208 @@ async def auto_attach_assets(project_id: str, body: AutoAttachRequest, user=Depe
     failed = 0
     details: list[dict] = []
 
+    # --- Credits check: sum needed for scenes that will be attached ---
+    total_needed = 0
+    for _s in scenes:
+        _d = _get_scene_duration(_s)
+        _n = max(1, math.ceil(_d / 3))
+        _sid = str(_s.get("id") or _s.get("_id"))
+        _cnt = await db.assets.count_documents({"project_id": project_id, "scene_id": _sid, "asset_type": {"$in": ["stock_video", "stock_image"]}})
+        if _cnt > 0 and not body.replace_existing:
+            if _cnt >= _n:
+                continue
+            total_needed += (_n - _cnt)
+        else:
+            total_needed += _n
+    # ensure subscription exists and check - also check finite redis tenant:{id} credits (DODO/PayPal finite via hincrby)
+    sub = await db.subscriptions.find_one({"user_id": user["id"]}, {"_id": 0})
+    # Try redis finite credits first (DODO/PayPal webhook grants via hincrby tenant:{id})
+    redis_credits = None
+    try:
+        import redis as _r
+        _rc = _r.Redis(host=os.getenv("REDIS_HOST","localhost"), port=int(os.getenv("REDIS_PORT","6379")), db=0, decode_responses=True)
+        rc_data = _rc.hgetall(f"tenant:{user['id']}")
+        if rc_data and rc_data.get("credits") is not None:
+            try:
+                redis_credits = int(float(str(rc_data.get("credits"))))
+            except Exception:
+                redis_credits = None
+        _rc.close()
+    except Exception:
+        redis_credits = None
+    if not sub:
+        # fallback to ff_credits for backward compat, else create free 30, but prefer redis if present
+        ff = await db.ff_credits.find_one({"tenant_id": user["id"]}, {"_id": 0}) or await db.ff_credits.find_one({"user_id": user["id"]}, {"_id": 0})
+        if ff:
+            sub = {"credits_remaining": int(ff.get("credits", 30)), "credits_monthly": int(ff.get("credits", 30))}
+        elif redis_credits is not None:
+            sub = {"credits_remaining": redis_credits, "credits_monthly": max(redis_credits, 30), "plan": "finite", "current_period_end": _now() + timedelta(days=30)}
+        else:
+            # create free subscription 30 credits
+            sub_doc = {
+                "user_id": user["id"],
+                "paddle_customer_id": None,
+                "paddle_subscription_id": None,
+                "paddle_price_id": None,
+                "plan": "free",
+                "status": "active",
+                "credits_monthly": 30,
+                "credits_remaining": 30,
+                "current_period_end": _now() + timedelta(days=30),
+                "created_at": _now(),
+                "updated_at": _now(),
+            }
+            await db.subscriptions.insert_one(sub_doc)
+            sub = sub_doc
+    # Prefer redis finite credits if higher than subscription
+    remaining = int(sub.get("credits_remaining", 30) if isinstance(sub, dict) else 30)
+    if redis_credits is not None and redis_credits > remaining:
+        remaining = redis_credits
+        sub["credits_remaining"] = remaining
+    if total_needed > 0 and remaining < total_needed:
+        reset_at = sub.get("current_period_end") or _now() + timedelta(days=30)
+        if hasattr(reset_at, 'isoformat'):
+            reset_at = reset_at.isoformat()
+        raise HTTPException(status_code=402, detail={"code": "credits_exhausted", "reset_at": reset_at, "plan": sub.get("plan", "free"), "remaining": remaining, "required": total_needed, "quota": int(sub.get("credits_monthly", 30)), "message": f"Insufficient credits: {remaining} remaining, {total_needed} required. Need {total_needed} credits for {total_needed} assets (3s each)."})
+
     for scene in scenes:
         scene_id = str(scene.get("id") or scene.get("_id"))
-        existing = await db.assets.find_one({
+        # 3-second rule: ceil(duration/3) assets per scene (10 for 30s), 3s each
+        duration = _get_scene_duration(scene)
+        num_needed = max(1, math.ceil(duration / 3))
+        # Handle existing count and replace logic
+        existing_count = await db.assets.count_documents({
             "project_id": project_id,
             "scene_id": scene_id,
             "asset_type": {"$in": ["stock_video", "stock_image"]},
-        }, {"_id": 0})
-
-        if existing and not body.replace_existing:
-            skipped += 1
-            details.append({"scene_id": scene_id, "scene_number": scene["scene_number"], "status": "skipped", "reason": "already_has_stock"})
-            continue
-
-        # v2.7 FIX: Generate 3 ordered queries per scene: pexels_video cinematic full, pixabay_video shorter core, unsplash_image shortest
-        # Preserve full Visual + cinematic suffix, retry with core 3-4 words then image fallback. Count image as attached via Ken Burns.
-        try:
-            import logging
-            logger = logging.getLogger("facelessforge.routes")
-            ordered = _build_ordered_stock_queries(scene, project)
-            picked = []
-            picked_query = ""
-            picked_source = ""
-            picked_media_type = ""
-            # Respect body.media_type but allow fallback to image even if videos requested (image via Burns valid)
-            requested = (body.media_type or "both").strip().lower()
-            if requested not in ("both", "videos", "photos"):
-                requested = "both"
-            for qobj in ordered:
-                q = qobj["query"]
-                src = qobj["source"]
-                mt = qobj["media_type"]  # videos or photos
-                # If client requested videos only, still allow final image fallback (unsplash) after video attempts fail
-                # If client requested photos only, skip video sources
-                if requested == "photos" and mt == "videos":
-                    continue
-                # If requested videos, allow photos only as last-resort fallback (unsplash image)
-                if requested == "videos" and src == "unsplash" and mt == "photos":
-                    pass
-                elif requested == "videos" and mt == "photos" and src != "unsplash":
-                    continue
-                try:
-                    result = await stock_service.search_stock_with_source(q, src, mt, per_page=12)
-                    results = result.get("results") or []
-                except Exception as e:
-                    logger.warning("auto-attach scene %s: source=%s query='%s' error=%s", scene["scene_number"], src, q[:80], e)
-                    results = []
-                    try:
-                        result = await stock_service.search_stock(q, mt, per_page=12)
-                        results = result.get("results") or []
-                    except Exception:
-                        results = []
-                logger.info("auto-attach scene %s: stock search source=%s type=%s query='%s' -> %d results", scene["scene_number"], src, mt, q[:100], len(results))
-                if results:
-                    if mt == "videos":
-                        video_results = [r for r in results if r.get("media_type") == "stock_video" and r.get("download_url")]
-                        if video_results:
-                            picked = video_results[:3]
-                        else:
-                            continue
-                    else:
-                        image_results = [r for r in results if r.get("media_type") == "stock_image"]
-                        if image_results:
-                            picked = image_results[:3]
-                        else:
-                            picked = results[:3]
-                    if picked:
-                        picked_query = q
-                        picked_source = src
-                        picked_media_type = mt
-                        break
-            if not picked:
-                failed += 1
-                details.append({"scene_id": scene_id, "scene_number": scene["scene_number"], "status": "failed", "reason": "no_stock_results"})
+        })
+        if existing_count > 0 and not body.replace_existing:
+            if existing_count >= num_needed:
+                skipped += 1
+                details.append({"scene_id": scene_id, "scene_number": scene.get("scene_number"), "status": "skipped", "reason": "already_has_stock"})
                 continue
-            if picked and picked[0].get("media_type") == "stock_image":
-                logger.info("auto-attach scene %s: fallback to image kind=image (Ken Burns) source=%s query='%s'", scene["scene_number"], picked_source, picked_query[:80])
-            else:
-                logger.info("auto-attach scene %s: selected video source=%s query='%s'", scene["scene_number"], picked_source, picked_query[:80])
-
-            if existing and body.replace_existing:
+            remaining = num_needed - existing_count
+        else:
+            if body.replace_existing and existing_count > 0:
                 await db.assets.delete_many({
                     "project_id": project_id,
                     "scene_id": scene_id,
                     "asset_type": {"$in": ["stock_video", "stock_image"]},
                 })
-                picked = picked[:1]
-            elif existing:
-                existing_count = await db.assets.count_documents({
-                    "project_id": project_id,
-                    "scene_id": scene_id,
-                    "asset_type": {"$in": ["stock_video", "stock_image"]},
-                })
-                if existing_count >= 3:
-                    skipped += 1
-                    details.append({"scene_id": scene_id, "scene_number": scene["scene_number"], "status": "skipped", "reason": "already_has_stock"})
-                    continue
-                if existing_count > 0:
-                    picked = picked[:1]
-                else:
-                    picked = picked[:1]
-            else:
-                picked = picked[:1]
+                existing_count = 0
+            remaining = num_needed
 
-            for top in picked:
+        # Build query from search_terms[0] as spec, truncated to 60 (stock.py will also truncate to 4 words)
+        try:
+            import logging
+            logger = logging.getLogger("facelessforge.routes")
+            terms = scene.get("search_terms") or []
+            visual = (scene.get("visual_direction") or scene.get("visual") or "").strip()
+            if terms and isinstance(terms, list) and len(terms) > 0 and str(terms[0]).strip():
+                q_raw = str(terms[0]).strip()[:60]
+            elif visual:
+                q_raw = visual.split(",")[0].strip()[:60] if "," in visual else visual.split(".")[0].strip()[:60]
+                if not q_raw:
+                    q_raw = visual[:60]
+            else:
+                q_raw = (project.get("topic") or "ancient Rome").strip()[:60]
+            query = q_raw.strip()
+            if not query:
+                query = "ancient Rome"
+            # Gather existing ids to exclude (dedup)
+            existing_assets = await db.assets.find({"project_id": project_id, "scene_id": scene_id, "asset_type": {"$in": ["stock_video", "stock_image"]}}, {"_id": 0, "external_id": 1, "preview_url": 1}).to_list(100)
+            existing_ids = set()
+            for ea in existing_assets:
+                if ea.get("external_id"):
+                    existing_ids.add(str(ea.get("external_id")))
+                if ea.get("preview_url"):
+                    existing_ids.add(str(ea.get("preview_url")))
+            per_page = max(remaining * 2, remaining + 5)
+            per_page = min(per_page, 40)
+            result = None
+            if hasattr(stock_service, "search_stock_aggregated"):
+                result = await stock_service.search_stock_aggregated(query=query, media_type="both", per_page=per_page)
+            else:
+                result = await stock_service.search_stock(query, "both", per_page)
+            results = (result.get("results") or []) if result else []
+            # Filter out already attached
+            filtered = []
+            for r in results:
+                ext = str(r.get("external_id") or "")
+                prev = str(r.get("preview_url") or "")
+                if ext in existing_ids or prev in existing_ids:
+                    continue
+                filtered.append(r)
+            unique = _dedup_by_preview(filtered)[:remaining]
+            if not unique:
+                failed += 1
+                details.append({"scene_id": scene_id, "scene_number": scene.get("scene_number"), "status": "failed", "reason": "no_stock_results"})
+                continue
+            start_order = existing_count
+            for i, asset in enumerate(unique):
+                order = start_order + i
+                start_offset = order * 3  # 0,3,6,9...
+                duration_asset = 3
                 doc = {
                     "id": str(uuid.uuid4()),
                     "project_id": project_id,
                     "scene_id": scene_id,
-                    "name": top["title"],
-                    "asset_type": top["media_type"],
+                    "name": asset.get("title") or asset.get("name") or f"Asset {order+1}",
+                    "asset_type": asset.get("media_type") or asset.get("asset_type") or "stock_image",
                     "file_path": None,
-                    "source": top["source"],
-                    "external_id": top["external_id"],
-                    "preview_url": top.get("preview_url"),
-                    "source_url": top.get("source_url"),
-                    "download_url": top.get("download_url"),
-                    "attribution_name": top.get("attribution_name"),
-                    "attribution_url": top.get("attribution_url"),
-                    "width": top.get("width"),
-                    "height": top.get("height"),
-                    "duration": top.get("duration"),
-                    "tags": top.get("tags") or [],
-                    "query": picked_query,
+                    "source": asset.get("source") or "pexels",
+                    "external_id": asset.get("external_id") or str(uuid.uuid4()),
+                    "preview_url": asset.get("preview_url"),
+                    "source_url": asset.get("source_url"),
+                    "download_url": asset.get("download_url"),
+                    "attribution_name": asset.get("attribution_name"),
+                    "attribution_url": asset.get("attribution_url"),
+                    "width": asset.get("width"),
+                    "height": asset.get("height"),
+                    "duration": duration_asset,
+                    "tags": asset.get("tags") or [],
+                    "query": query,
                     "status": "attached",
+                    "order": order,
+                    "start_offset": start_offset,
+                    "scene_duration": duration,
                     "created_at": _now(),
                     "updated_at": _now(),
                 }
                 try:
                     await db.assets.insert_one(doc)
                     attached += 1
-                    details.append({"scene_id": scene_id, "scene_number": scene["scene_number"], "status": "attached", "asset_id": doc["id"]})
-                except Exception as insert_err:
+                    details.append({"scene_id": scene_id, "scene_number": scene.get("scene_number"), "status": "attached", "asset_id": doc["id"], "order": order, "start_offset": start_offset})
+                except Exception:
                     skipped += 1
-                    details.append({"scene_id": scene_id, "scene_number": scene["scene_number"], "status": "skipped", "reason": "duplicate"})
+                    details.append({"scene_id": scene_id, "scene_number": scene.get("scene_number"), "status": "skipped", "reason": "duplicate"})
+            # Deduct credits for this scene's attached assets - finite via hincrby tenant:{id} as well
+            if unique:
+                await db.subscriptions.update_one({"user_id": user["id"]}, {"$inc": {"credits_remaining": -len(unique)}, "$set": {"updated_at": _now()}})
+                for _ in range(len(unique)):
+                    await db.credit_transactions.insert_one({
+                        "id": str(uuid.uuid4()),
+                        "user_id": user["id"],
+                        "amount": -1,
+                        "reason": f"auto-attach scene {scene.get('scene_number')} {duration}s",
+                        "created_at": _now(),
+                    })
+                # also mirror to ff_credits for backward compat
+                try:
+                    await db.ff_credits.update_one({"tenant_id": user["id"]}, {"$inc": {"credits": -len(unique)}})
+                except: pass
+                # Deduct finite redis tenant credits via hincrby (atomic)
+                try:
+                    import redis as _r2
+                    _rc2 = _r2.Redis(host=os.getenv("REDIS_HOST","localhost"), port=int(os.getenv("REDIS_PORT","6379")), db=0, decode_responses=True)
+                    _rc2.hincrby(f"tenant:{user['id']}", "credits", -len(unique))
+                    _rc2.close()
+                except Exception:
+                    pass
+            logger.info("auto-attach scene %s duration=%s num_needed=%s remaining=%s query='%s' -> %d unique attached %d", scene.get("scene_number"), duration, num_needed, remaining, query[:60], len(unique), attached)
         except Exception as e:
             failed += 1
-            details.append({"scene_id": scene_id, "scene_number": scene["scene_number"], "status": "failed", "reason": str(e)[:120]})
+            details.append({"scene_id": scene_id, "scene_number": scene.get("scene_number"), "status": "failed", "reason": str(e)[:120]})
 
     # Required journalctl log for spec: [ATTACH] 18 attached 0 failed
     import logging as _logging
@@ -1483,6 +1642,7 @@ async def render_preflight(project_id: str, user=Depends(get_current_user)):
 async def render_start(project_id: str,
                        body: RenderStartRequest = Body(default=None),
                        user=Depends(get_current_user)):
+    _check_render_rate(user["id"])
     db = get_db()
     project = await db.projects.find_one({"id": project_id}, {"_id": 0})
     _ensure_project_access(project, user, write=True)
@@ -1516,7 +1676,10 @@ async def render_start(project_id: str,
     try:
         job = await render_service.queue_render(project_id, requested_by=user["id"])
     except RuntimeError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=_scrub_email(str(e)))
+    # scrub email in log
+    import logging as _logging
+    _logging.getLogger("facelessforge.render").info("render start project=%s user=%s", project_id, _scrub_email(user.get("email","")))
     return _ser(job)
 
 
@@ -1553,6 +1716,126 @@ async def render_cancel_job(project_id: str, job_id: str, user=Depends(get_curre
         raise HTTPException(status_code=400, detail="Job is not cancellable in its current state.")
     job = await db.render_jobs.find_one({"id": job_id, "project_id": project_id}, {"_id": 0})
     return _ser(job)
+
+
+# ============================ PROD FIXES: billing balance + full render + thumbnails ============================
+import time as _time
+_RENDER_RATE = {}
+def _scrub_email(s: str) -> str:
+    import re
+    return re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "[email-redacted]", str(s))
+def _check_render_rate(user_id: str):
+    now = _time.time()
+    bucket = _RENDER_RATE.get(user_id, [])
+    bucket = [t for t in bucket if now - t < 3600]
+    if len(bucket) >= 5:
+        raise HTTPException(status_code=429, detail="Rate limited: 5 renders per hour")
+    bucket.append(now)
+    _RENDER_RATE[user_id] = bucket
+
+@router.get("/billing/balance")
+async def billing_balance(user=Depends(get_current_user)):
+    from .db import get_db as _get_db
+    db = _get_db()
+    # reuse billing status logic
+    try:
+        from .billing import get_billing_status_for_user
+        return await get_billing_status_for_user(user)
+    except Exception:
+        # fallback to dodo credits
+        try:
+            import redis
+            r = redis.Redis(host=os.getenv("REDIS_HOST","localhost"), port=int(os.getenv("REDIS_PORT","6379")), decode_responses=True)
+            data = r.hgetall(f"tenant:{user['id']}")
+            credits = int(data.get("credits", 0) or 0)
+            return {"credits": credits, "remaining": credits, "monthly": 150, "quota": 150, "plan": "free", "balance": credits}
+        except:
+            return {"credits": 30, "remaining": 30, "monthly": 30, "quota": 30, "plan": "free", "balance": 30}
+
+@router.get("/thumbnails/{asset_id}")
+async def get_thumbnail(asset_id: str, request: Request, user=Depends(get_current_user)):
+    from .db import get_db as _get_db
+    from fastapi.responses import FileResponse, Response
+    db = _get_db()
+    asset = await db.assets.find_one({"id": asset_id}, {"_id": 0})
+    if not asset:
+        # fallback image
+        fallback = Path(__file__).parent.parent / "static" / "thumbs" / "fallback.png"
+        if fallback.exists():
+            return FileResponse(str(fallback), media_type="image/png")
+        return Response(status_code=404, content=b"not found")
+    fp = asset.get("file_path")
+    if fp and Path(fp).exists():
+        ext = Path(fp).suffix.lower()
+        ct = "image/png" if ext==".png" else "image/jpeg" if ext in (".jpg",".jpeg") else "image/svg+xml" if ext==".svg" else "image/png"
+        return FileResponse(str(fp), media_type=ct, headers={"Content-Disposition": f'inline; filename="{asset_id}{ext}"'})
+    url = asset.get("preview_url")
+    if url:
+        # redirect to remote with correct content-type header passthrough
+        return Response(status_code=302, headers={"Location": url})
+    fallback = Path(__file__).parent.parent / "static" / "thumbs" / "fallback.png"
+    if fallback.exists():
+        return FileResponse(str(fallback), media_type="image/png")
+    return Response(status_code=404, content=b"fallback not found")
+
+def _full_render_impl(project_id: str, user: dict):
+    # shared logic for full render idempotent
+    return project_id
+
+@router.post("/render/full/{project_id}")
+async def render_full(project_id: str, user=Depends(get_current_user)):
+    _check_render_rate(user["id"])
+    db = get_db()
+    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    _ensure_project_access(project, user, write=True)
+    # idempotent: if active job exists return it
+    active = await db.render_jobs.find_one({"project_id": project_id, "status": {"$in": ["queued","validating","preparing_assets","rendering"]}}, {"_id": 0})
+    if active:
+        return {"queued": True, "job": _ser(active), "idempotent": True}
+    # validate
+    script = await db.scripts.find_one({"project_id": project_id}, {"_id": 0})
+    scenes = await db.scenes.find({"project_id": project_id}).sort("scene_number", 1).to_list(500)
+    metadata = await db.metadata_packages.find_one({"project_id": project_id}, {"_id": 0})
+    assets = await db.assets.find({"project_id": project_id}, {"_id": 0}).to_list(500)
+    check = render_service.validate_prerequisites(project, script, scenes, metadata, assets)
+    if not check["ok"]:
+        raise HTTPException(status_code=400, detail={"message": "Prerequisites not met", "issues": check["issues"]})
+    try:
+        job = await render_service.queue_render(project_id, requested_by=user["id"])
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=_scrub_email(str(e)))
+    # scrub email from logs
+    import logging as _logging
+    _logging.getLogger("facelessforge.render").info("full render queued project=%s user=%s", project_id, _scrub_email(user.get("email","")))
+    return {"queued": True, "job": _ser(job)}
+
+@router.post("/projects/{project_id}/render/full")
+async def render_full_alias(project_id: str, user=Depends(get_current_user)):
+    return await render_full(project_id, user)
+
+# --- Waitlist (public, used by landing) ---
+from pydantic import BaseModel as _BM
+class _WaitlistReq(_BM):
+    email: str
+
+@router.post("/waitlist")
+async def join_waitlist(body: _WaitlistReq):
+    email = (body.email or "").strip().lower()
+    if "@" not in email:
+        raise HTTPException(status_code=400, detail="valid email required")
+    db = get_db()
+    existing = await db.waitlist.find_one({"email": email}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=409, detail="already on waitlist")
+    doc = {"id": str(uuid.uuid4()), "email": email, "created_at": _now()}
+    await db.waitlist.insert_one(doc)
+    return {"ok": True, "email": email}
+
+@router.get("/waitlist")
+async def list_waitlist(user=Depends(require_roles("admin"))):
+    db = get_db()
+    items = await db.waitlist.find({}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return items
 
 
 # ============================ ADMIN DIAGNOSTICS / RETENTION ============================
@@ -2029,7 +2312,116 @@ async def public_share(token: str):
             "duration": final_render.get("duration"),
             "width": 1920,
             "height": 1080,
+            "download_url": final_render.get("output_url"),
+            "gcs_mirror": final_render.get("output_url"),
+            "r2_mirror": final_render.get("output_url"),
+        } if final_render else None),
+        "posting_guidance": {
+            "youtube_title": (metadata or {}).get("selected_title"),
+            "description": (metadata or {}).get("description"),
+            "tags": (metadata or {}).get("tags") or [],
+            "hashtags": (metadata or {}).get("hashtags") or [],
+            "steps": [
+                "Upload MP4 native — don't re-encode (1080p 30fps H.264/AAC)",
+                "Title: Copy YouTube title from share page (<70 chars)",
+                "Description: Paste full description + add your company.com link first line",
+                "Tags: Copy tags block; add niche hashtag",
+                "Thumbnail: Download selected thumbnail as custom thumbnail 1280x720",
+                "Scheduling: Post 10am-2pm local, add chapters, pin comment",
+                "Shorts/Reels: Crop center 1080x1920 if vertical needed",
+            ],
+            "cta": "Need help? Reply — support@ethinx.solutions — ABN 60 578 933 517",
+        },
+        "download": ({
+            "mp4": final_render.get("output_url"),
+            "gcs_mirror": final_render.get("output_url"),
+            "r2_url": final_render.get("output_url"),
+            "filename": f"{(project.get('name') or 'facelessforge').replace(' ', '_')}.mp4",
         } if final_render else None),
         "shared_at": project.get("updated_at").isoformat()
             if isinstance(project.get("updated_at"), datetime) else project.get("updated_at"),
+        "abn": "EthinX Solutions ABN 60 578 933 517",
     }
+
+
+# ── Email: Your video IS ready — {FirstName} {company.com} ──
+
+@router.get("/projects/{project_id}/email/preview")
+async def email_preview(project_id: str, user=Depends(get_current_user)):
+    """Preview the Your video IS ready cold email for a project (no send)."""
+    from .email import render_video_ready_email, get_email_service_status
+    db = get_db()
+    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    _ensure_project_access(project, user)
+    # Find latest completed render for MP4 URL
+    final = await db.render_jobs.find_one(
+        {"project_id": project_id, "status": "completed", "output_url": {"$ne": None}},
+        {"_id": 0},
+        sort=[("completed_at", -1)],
+    )
+    mp4_url = (final or {}).get("output_url") or f"/api/projects/{project_id}/download"
+    # Build share url if enabled
+    share_url = None
+    if project.get("share_enabled") and project.get("share_token"):
+        base = os.environ.get("FRONTEND_URL", "https://facelessforge.ethinx.solutions").rstrip("/")
+        share_url = f"{base}/s/{project['share_token']}"
+    preview = render_video_ready_email(user=user, project=project, mp4_url=mp4_url, share_url=share_url)
+    return {
+        "service": get_email_service_status(),
+        "project_id": project_id,
+        "mp4_url": mp4_url,
+        "share_url": share_url,
+        "gcs_mirror": mp4_url,
+        "download": mp4_url,
+        "email": preview,
+        "posting_guidance": preview["text"].split("POSTING GUIDANCE")[1][:1200] if "POSTING GUIDANCE" in preview["text"] else None,
+    }
+
+
+@router.post("/projects/{project_id}/email/send")
+async def email_send(project_id: str, user=Depends(get_current_user)):
+    """Send Your video IS ready email to project owner (owner or admin). Triggers actual send/log."""
+    from .email import send_video_ready_email
+    db = get_db()
+    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    _ensure_project_access(project, user, write=False)
+    final = await db.render_jobs.find_one(
+        {"project_id": project_id, "status": "completed", "output_url": {"$ne": None}},
+        {"_id": 0},
+        sort=[("completed_at", -1)],
+    )
+    if not final or not final.get("output_url"):
+        raise HTTPException(status_code=400, detail="No completed render — MP4 not ready yet")
+    owner = await db.users.find_one({"id": project["user_id"]}, {"_id": 0})
+    if not owner:
+        raise HTTPException(status_code=404, detail="Project owner not found")
+    share_url = None
+    if project.get("share_enabled") and project.get("share_token"):
+        base = os.environ.get("FRONTEND_URL", "https://facelessforge.ethinx.solutions").rstrip("/")
+        share_url = f"{base}/s/{project['share_token']}"
+    result = await send_video_ready_email(user=owner, project=project, mp4_url=final["output_url"], share_url=share_url)
+    return result
+
+
+@router.get("/projects/{project_id}/download")
+async def download_redirect(project_id: str, user=Depends(get_current_user)):
+    """Redirect to MP4 download (R2/GCS mirror). Also supports anonymous via share token query."""
+    from fastapi.responses import RedirectResponse
+    db = get_db()
+    project = await db.projects.find_one({"id": project_id}, {"_id": 0})
+    _ensure_project_access(project, user)
+    final = await db.render_jobs.find_one(
+        {"project_id": project_id, "status": "completed", "output_url": {"$ne": None}},
+        {"_id": 0},
+        sort=[("completed_at", -1)],
+    )
+    if not final or not final.get("output_url"):
+        raise HTTPException(status_code=404, detail="No completed render for download")
+    return RedirectResponse(url=final["output_url"], status_code=302)
+
+
+@router.get("/email/status")
+async def email_status(user=Depends(get_current_user)):
+    """Email service config check (any authenticated user)."""
+    from .email import get_email_service_status
+    return get_email_service_status()
