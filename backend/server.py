@@ -42,7 +42,14 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path as _P2
+_static_dir = _P2(__file__).parent / "static"
+_static_dir.mkdir(parents=True, exist_ok=True)
+
 app = FastAPI(title="Restless Forge - FacelessForge Production", version="5.0", docs_url="/api/docs", redoc_url="/api/redoc", lifespan=lifespan)
+# Static mount for /api/static/* - must be before routers
+app.mount("/api/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 app.add_middleware(
     CORSMiddleware,
@@ -115,3 +122,17 @@ try:
  print("Dodo mounted")
 except Exception as e:
  print(e)
+try:
+ from app.workers.autopost import autopost_router
+ app.include_router(autopost_router)
+ print("Autopost mounted")
+except Exception as e:
+ print(f"Autopost mount failed {e}")
+try:
+ from promo_swarm.app import app as promo_app
+ # mount promo swarm under /api/promo for unified health
+ from fastapi.responses import JSONResponse
+ import httpx
+ print("Promo swarm available at :8095")
+except Exception as e:
+ print(f"Promo swarm mount check failed {e}")

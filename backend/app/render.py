@@ -202,6 +202,9 @@ INTRO_DURATION_SECONDS = 2.5
 # Track active asyncio tasks per project for cancellation
 _ACTIVE_TASKS: dict[str, asyncio.Task] = {}
 _LOCKS: dict[str, asyncio.Lock] = {}
+# Hetzner 16GB: 4 parallel renders stable, thread-capped BullMQ + Redis style
+MAX_CONCURRENT_RENDERS = int(os.environ.get("MAX_CONCURRENT_RENDERS", "4"))
+_RENDER_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_RENDERS)
 
 
 def _now() -> datetime:
@@ -1291,19 +1294,21 @@ async def cancel_render(project_id: str, job_id: str) -> bool:
 
 
 async def _run_render_safe(job_id: str, project_id: str):
-    try:
-        await _run_render(job_id, project_id)
-    except asyncio.CancelledError:
-        await _set_job(job_id, status="cancelled", current_step="cancelled",
-                       error_message="Cancelled by user", completed_at=_now())
-        raise
-    except Exception as e:  # noqa: BLE001
-        logger.exception("Render job failed")
-        await _set_job(job_id, status="failed", current_step="failed",
-                       error_message=f"{type(e).__name__}: {e}"[:240],
-                       completed_at=_now())
-    finally:
-        _ACTIVE_TASKS.pop(project_id, None)
+    # Hetzner 16GB 4 at once, thread-capped BullMQ + Redis style
+    async with _RENDER_SEMAPHORE:
+        try:
+            await _run_render(job_id, project_id)
+        except asyncio.CancelledError:
+            await _set_job(job_id, status="cancelled", current_step="cancelled",
+                           error_message="Cancelled by user", completed_at=_now())
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.exception("Render job failed")
+            await _set_job(job_id, status="failed", current_step="failed",
+                           error_message=f"{type(e).__name__}: {e}"[:240],
+                           completed_at=_now())
+        finally:
+            _ACTIVE_TASKS.pop(project_id, None)
 
 
 async def _run_render(job_id: str, project_id: str):
@@ -1654,8 +1659,9 @@ async def _run_render(job_id: str, project_id: str):
             # video duration for fade — prefer burned_out probe, fallback to vo_dur
             burned_dur = await _probe_duration_seconds(burned_out) or vo_dur or 0.0
             fade_start = max(0.0, burned_dur - 2.0) if burned_dur else max(0.0, vo_dur - 2.0)
-            # Vol duck: bg at 0.15 (~ -16dB) while VO active, passthrough after. Filter removes aloop/size=2e9 entirely;
+            # Vol duck: bg at 0.126 (~ -18dB sidechain) while VO active, passthrough after. Filter removes aloop/size=2e9 entirely;
             # -stream_loop on input already loops bg, amix shortest trims to video length.
+            # Spec: Music must duck under voice - not drown it. Fix: -18dB sidechain when voice plays (0.126 = -18dB)
             cmd = [
                 FFMPEG_BIN, "-y",
                 "-i", str(burned_out),
@@ -1663,7 +1669,7 @@ async def _run_render(job_id: str, project_id: str):
                 "-stream_loop", "-1", "-i", str(music_path),
                 "-filter_complex",
                 f"[1:a]aformat=sample_fmts=fltp:channel_layouts=stereo,afade=t=out:st={fade_start:.2f}:d=2[voa];"
-                f"[2:a]aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.15:enable='between(t,0,{vo_dur:.2f})',afade=t=out:st={fade_start:.2f}:d=2[bgduck];"
+                f"[2:a]aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.126:enable='between(t,0,{vo_dur:.2f})',afade=t=out:st={fade_start:.2f}:d=2[bgduck];"
                 f"[bgduck][voa]amix=inputs=2:duration=shortest:dropout_transition=0:normalize=0[aout]",
                 "-map", "0:v", "-map", "[aout]",
                 "-c:v", "copy",
@@ -1694,7 +1700,7 @@ async def _run_render(job_id: str, project_id: str):
                 str(final),
             ]
         elif use_music:
-            # Music only — volume 0.15 constant, no loudnorm in graph (post-pass will handle)
+            # Music only — volume 0.126 constant (-18dB), no loudnorm in graph (post-pass will handle)
             burned_dur = await _probe_duration_seconds(burned_out) or 0.0
             music_dur = await _probe_duration_seconds(music_path) or burned_dur or 0.0
             fade_ref = burned_dur if burned_dur > 0 else music_dur
@@ -1704,7 +1710,7 @@ async def _run_render(job_id: str, project_id: str):
                 "-i", str(burned_out),
                 "-stream_loop", "-1", "-i", str(music_path),
                 "-filter_complex",
-                f"[1:a]aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.15,afade=t=out:st={fade_start:.2f}:d=2[aout]",
+                f"[1:a]aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0.126,afade=t=out:st={fade_start:.2f}:d=2[aout]",
                 "-map", "0:v", "-map", "[aout]",
                 "-c:v", "copy",
                 "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
@@ -1828,6 +1834,27 @@ async def _run_render(job_id: str, project_id: str):
             file_size=(saved.file_path.stat().st_size if saved.file_path and saved.file_path.exists() else final.stat().st_size if final.exists() else None),
             duration=duration, completed_at=_now(), error_message=None, verification=verification_result)
         await db.projects.update_one({"id": project_id}, {"$set": {"status": "COMPLETED", "rendered_video_asset_id": job_id, "updated_at": _now()}})
+
+        # ── Auto-post engine: if project.auto_post=true, post to platform of choice (no manual prep) ──
+        try:
+            proj_for_post = await db.projects.find_one({"id": project_id}, {"_id":0})
+            if proj_for_post and proj_for_post.get("auto_post"):
+                # fetch metadata for title/description
+                meta_for_post = await db.metadata_packages.find_one({"project_id": project_id}, {"_id":0}) or {}
+                meta_for_post["duration"] = duration
+                # build render_job dict for autopost
+                rj = {"output_url": saved.url, "output_path": str(saved.file_path) if saved.file_path else str(final), "duration": duration, "id": job_id}
+                try:
+                    from .workers.autopost import autopost_after_render
+                    # fire-and-forget but await quickly with timeout 20s
+                    try:
+                        await asyncio.wait_for(autopost_after_render(proj_for_post, rj, meta_for_post), timeout=20)
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[AUTOPOST] timeout project={project_id}")
+                except Exception as ae:
+                    logger.warning(f"[AUTOPOST] hook failed project={project_id}: {ae}")
+        except Exception as ae:
+            logger.warning(f"[AUTOPOST] outer failed {ae}")
 
         # ── Cold email: Your video IS ready — {FirstName} {company.com} ──
         try:
