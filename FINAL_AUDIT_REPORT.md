@@ -7,6 +7,7 @@
 - **TestSprite project:** `FacelessForge Production`
 - **Project ID:** `833859c5-d1f8-4034-87af-739b19505cfb`
 - **Tests created:** 19 (15 broad production tests and 4 focused audit-copy tests)
+- **Final TestSprite inventory after all reruns:** 19 total; 6 passed, 13 failed, 0 blocked
 - **Final production batch:** 16 dispatched; 4 passed, 12 failed, 0 timed out
 - **Focused audit-copy reruns:** login passed, password reset passed, registration failed at the fixture/flow boundary
 - **Deployment:** none; `/opt/facelessforge/deploy` was not modified
