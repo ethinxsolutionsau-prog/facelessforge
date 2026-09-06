@@ -73,6 +73,7 @@ The catch-all frontend route accepted every GET path. A POST to an API path matc
 - `backend/server.py`: explicitly includes the auth router and changes the SPA converter to exclude `api` paths, preserving API JSON 401/404/405 responses. R2 fallback credentials in the audit copy now come only from environment variables; no secret values are added by this fix.
 - `frontend/craco.config.js`: allows the existing `.ts`/`.tsx` imports so the audit-copy production build completes.
 - `audit/tests/test_auth_routing.py`, `audit/local_auth_server.py`, and `audit/testsprite/*`: disposable local verification harness, plans, and TestSprite evidence. Test artifacts under `audit/testsprite/runs/` are ignored and contain raw runner output.
+- **Diff record:** `git diff HEAD~2..HEAD --stat` is 61 files changed, 6,760 insertions, and 2,658 deletions. The full patch is in commits `d20dc5b` and `3924f80`; `git diff --check` passed. Local build output, recordings, and untracked scratch files were excluded from the commits.
 
 The change deliberately does not mount the large dormant generation/project router. Authenticated project APIs remain a separate review item because enabling that router blindly would expand permissions and tenant-facing surface area.
 
