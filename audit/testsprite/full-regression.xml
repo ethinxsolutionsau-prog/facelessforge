@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="testsprite:833859c5-d1f8-4034-87af-739b19505cfb" tests="16" failures="12" errors="0" skipped="0" time="0">
+    <testcase classname="833859c5-d1f8-4034-87af-739b19505cfb" name="Audit: Create project and project detail" testId="152284c1-586c-4486-ae8b-d9cd06ace517" runId="70d0b6fe-c236-42f8-8997-24b12f93d474" time="0">
+      <failure message="failed" type="failed">status: failed
+runId: 70d0b6fe-c236-42f8-8997-24b12f93d474</failure>
+    </testcase>
+    <testcase classname="833859c5-d1f8-4034-87af-739b19505cfb" name="Audit: Unknown routes and frontend backend consistency" testId="18269415-dd1b-4978-9bdc-b34e62df4075" runId="d700c25d-5c5f-4169-b059-71598c97a550" time="0">
+    </testcase>
+    <testcase classname="833859c5-d1f8-4034-87af-739b19505cfb" name="Audit: Landing and static resources" testId="7f651b39-f586-4ea2-9071-0512023e2be3" runId="c0f994e8-2939-4bc0-98f8-f75ab77b978c" time="0">
+    </testcase>
+    <testcase classname="833859c5-d1f8-4034-87af-739b19505cfb" name="Audit: Forgot and reset password" testId="100efdff-76a2-4268-a953-30cc55893f65" runId="6a40b23b-32de-4168-979d-e4fa00d2b9a6" time="0">
+    </testcase>
+    <testcase classname="833859c5-d1f8-4034-87af-739b19505cfb" name="Audit: Authentication persistence and logout" testId="85dd67d3-c8c4-4764-8161-194038eb0ea2" runId="144aa0b9-27fa-466f-9508-e1ca1f3308e4" time="0">
+      <failure message="failed" type="failed">status: failed
+runId: 144aa0b9-27fa-466f-9508-e1ca1f3308e4</failure>
+    </testcase>
+    <testcase classname="833859c5-d1f8-4034-87af-739b19505cfb" name="Audit: Dashboard and projects list" testId="868253f1-e6a5-4f82-a95d-01c9b72fa046" runId="ba2de84d-bfe9-4443-81cb-384eafde008f" time="0">
+      <failure message="failed" type="failed">status: failed
+runId: ba2de84d-bfe9-4443-81cb-384eafde008f</failure>
+    </testcase>
+    <testcase classname="833859c5-d1f8-4034-87af-739b19505cfb" name="Audit: Analytics and automation" testId="90e19df7-8fa8-40c9-be1b-1518f5d4fb50" runId="ac3d0337-3211-470f-8b5b-e674c0402709" time="0">
+      <failure message="failed" type="failed">status: failed
+runId: ac3d0337-3211-470f-8b5b-e674c0402709</failure>
+    </testcase>
+    <testcase classname="833859c5-d1f8-4034-87af-739b19505cfb" name="Audit: Tenant isolation with dedicated QA fixtures" testId="942a9b46-7666-4798-a20f-ecdf121a8edc" runId="c54fd9d0-f67c-41ca-9e44-dbc4617902fa" time="0">
+      <failure message="failed" type="failed">status: failed
+runId: c54fd9d0-f67c-41ca-9e44-dbc4617902fa</failure>
+    </testcase>
+    <testcase classname="833859c5-d1f8-4034-87af-739b19505cfb" name="Audit: Protected API authorization" testId="94c0a68f-4b32-4d7a-b121-65fde52bf462" runId="35e1a77c-4d0a-4c4f-b608-b12505e64802" time="0">
+      <failure message="failed" type="failed">status: failed
+runId: 35e1a77c-4d0a-4c4f-b608-b12505e64802</failure>
+    </testcase>
+    <testcase classname="833859c5-d1f8-4034-87af-739b19505cfb" name="Audit: Asset library" testId="9ead90f0-dbdf-4e08-aa79-223c0f35b440" runId="ea58f9ec-3e07-48a9-ad12-f7190eb24377" time="0">
+    </testcase>
+    <testcase classname="833859c5-d1f8-4034-87af-739b19505cfb" name="Audit: YouTube OAuth initiation and callback boundary" testId="a6bb3360-811a-47f0-b3d1-e9bf1b50d6c7" runId="7a88f946-5bc5-4bba-bd55-a7b155aabb80" time="0">
+      <failure message="failed" type="failed">status: failed
+runId: 7a88f946-5bc5-4bba-bd55-a7b155aabb80</failure>
+    </testcase>
+    <testcase classname="833859c5-d1f8-4034-87af-739b19505cfb" name="Audit: Login valid QA credentials" testId="b0444c84-480e-4a7a-ba87-6b6930e63ac4" runId="0bdd2082-69bf-47ce-8044-6b95b9f9ab35" time="0">
+      <failure message="failed" type="failed">status: failed
+runId: 0bdd2082-69bf-47ce-8044-6b95b9f9ab35</failure>
+    </testcase>
+    <testcase classname="833859c5-d1f8-4034-87af-739b19505cfb" name="Audit: Render output and media" testId="d2c4af1c-b79e-47f4-9c4f-f10c808d5ecd" runId="edb64528-a9d7-403f-9eff-850fecfa2941" time="0">
+      <failure message="failed" type="failed">status: failed
+runId: edb64528-a9d7-403f-9eff-850fecfa2941</failure>
+    </testcase>
+    <testcase classname="833859c5-d1f8-4034-87af-739b19505cfb" name="Audit: QA registration and invite handling" testId="6ebe1597-4433-47cf-a155-2c2e61caba1a" runId="2507dfaa-dbc7-48c3-b89d-a6e5accbf6cf" time="0">
+      <failure message="failed" type="failed">status: failed
+runId: 2507dfaa-dbc7-48c3-b89d-a6e5accbf6cf</failure>
+    </testcase>
+    <testcase classname="833859c5-d1f8-4034-87af-739b19505cfb" name="Audit: Login rejects invalid credentials without 405" testId="80419589-89c2-446b-9833-2c6c12a2f9cc" runId="5aee48c1-8fa6-4ffa-a5b6-cc0a1452be9e" time="0">
+      <failure message="failed" type="failed">status: failed
+runId: 5aee48c1-8fa6-4ffa-a5b6-cc0a1452be9e</failure>
+    </testcase>
+    <testcase classname="833859c5-d1f8-4034-87af-739b19505cfb" name="Audit retest: invalid login returns auth error" testId="48b13895-b97c-4b03-b2a7-3dc3d7d10602" runId="401c4bc5-56da-4a92-895e-1ffcd4b46705" time="0">
+      <failure message="failed" type="failed">status: failed
+runId: 401c4bc5-56da-4a92-895e-1ffcd4b46705</failure>
+    </testcase>
+  </testsuite>
+</testsuites>

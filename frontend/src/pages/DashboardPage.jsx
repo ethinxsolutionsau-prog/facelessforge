@@ -164,7 +164,7 @@ export default function DashboardPage() {
 
       <div className="p-8 space-y-8 bg-[#0f141f] min-h-[calc(100vh-64px)]">
         {/* Metrics row */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard label="Total Projects" value={analytics?.total_projects ?? "—"} icon={FileVideo} context="+12% vs last month" contextUp={true} delay={0} />
           <StatCard label="Completed" value={analytics?.completed ?? "—"} icon={CheckCircle2} context="+8% vs last month" contextUp={true} delay={40} />
           <StatCard label="In Progress" value={analytics?.in_progress ?? "—"} icon={Activity} context="-8% drop" contextUp={false} delay={80} />

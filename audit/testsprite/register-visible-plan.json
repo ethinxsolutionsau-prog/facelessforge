@@ -1,0 +1,16 @@
+{
+  "projectId": "833859c5-d1f8-4034-87af-739b19505cfb",
+  "type": "frontend",
+  "name": "Audit local repaired registration flow",
+  "description": "Local audit-copy regression only. Create one disposable local account; never use production credentials or data.",
+  "planSteps": [
+    {
+      "type": "action",
+      "description": "Navigate to /register on the local app and fill name FF Local QA, email ff-local-qa-20260906@example.com, password Local-Only-QA-Password-123, leave role Creator, and click Create account."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify the page leaves the registration form without displaying Method Not Allowed or a server error, and the account creation request is accepted by the local app."
+    }
+  ]
+}

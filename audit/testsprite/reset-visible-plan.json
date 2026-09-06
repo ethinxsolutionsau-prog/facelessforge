@@ -1,0 +1,24 @@
+{
+  "projectId": "833859c5-d1f8-4034-87af-739b19505cfb",
+  "type": "frontend",
+  "name": "Audit local repaired password reset flow",
+  "description": "Local audit-copy regression only. Use a nonexistent account and invalid reset token; do not create an account or send email.",
+  "planSteps": [
+    {
+      "type": "action",
+      "description": "Navigate to /forgot-password on the local app, enter unknown@example.com, and click Send reset link."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify the page shows the generic acknowledgement Check your inbox and does not reveal whether the account exists."
+    },
+    {
+      "type": "action",
+      "description": "Navigate to /reset-password?token=invalid-audit-token on the local app, enter the same generated password twice, and click Update password."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify a clear invalid or already-used reset-link error is shown and the page does not report a successful password change."
+    }
+  ]
+}

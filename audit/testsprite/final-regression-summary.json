@@ -1,0 +1,151 @@
+{
+  "total": 19,
+  "passed": 4,
+  "failed": 15,
+  "timedOut": 0,
+  "runs": [
+    {
+      "testId": "48b13895-b97c-4b03-b2a7-3dc3d7d10602",
+      "title": "Audit retest: invalid login returns auth error",
+      "runId": "181fd908-de87-4649-8751-1ea55b0cd37e",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/48b13895-b97c-4b03-b2a7-3dc3d7d10602",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/928188e0-4a2b-4add-9678-cde9914b8582"
+    },
+    {
+      "testId": "152284c1-586c-4486-ae8b-d9cd06ace517",
+      "title": "Audit: Create project and project detail",
+      "runId": "a440c975-b872-42a7-ab46-e8d01dcd2168",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/152284c1-586c-4486-ae8b-d9cd06ace517",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/928188e0-4a2b-4add-9678-cde9914b8582"
+    },
+    {
+      "testId": "7f651b39-f586-4ea2-9071-0512023e2be3",
+      "title": "Audit: Landing and static resources",
+      "runId": "305f74d1-f12c-4347-8c1b-84ac58a2c897",
+      "status": "passed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/7f651b39-f586-4ea2-9071-0512023e2be3",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/928188e0-4a2b-4add-9678-cde9914b8582"
+    },
+    {
+      "testId": "100efdff-76a2-4268-a953-30cc55893f65",
+      "title": "Audit: Forgot and reset password",
+      "runId": "73ad1c9f-39f8-410b-9ea6-791b746343cc",
+      "status": "passed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/100efdff-76a2-4268-a953-30cc55893f65",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/928188e0-4a2b-4add-9678-cde9914b8582"
+    },
+    {
+      "testId": "18269415-dd1b-4978-9bdc-b34e62df4075",
+      "title": "Audit: Unknown routes and frontend backend consistency",
+      "runId": "988734f0-f7b4-427c-8d9d-333e824f7e7e",
+      "status": "passed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/18269415-dd1b-4978-9bdc-b34e62df4075",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/928188e0-4a2b-4add-9678-cde9914b8582"
+    },
+    {
+      "testId": "868253f1-e6a5-4f82-a95d-01c9b72fa046",
+      "title": "Audit: Dashboard and projects list",
+      "runId": "87b55c8a-5aaf-4d30-84f2-cd8673397baa",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/868253f1-e6a5-4f82-a95d-01c9b72fa046",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/928188e0-4a2b-4add-9678-cde9914b8582"
+    },
+    {
+      "testId": "90e19df7-8fa8-40c9-be1b-1518f5d4fb50",
+      "title": "Audit: Analytics and automation",
+      "runId": "18be6123-2e33-427a-a48a-85f59e5a2c8b",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/90e19df7-8fa8-40c9-be1b-1518f5d4fb50",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/928188e0-4a2b-4add-9678-cde9914b8582"
+    },
+    {
+      "testId": "6ebe1597-4433-47cf-a155-2c2e61caba1a",
+      "title": "Audit: QA registration and invite handling",
+      "runId": "42550996-79e5-4531-9d5e-062ecf04bf26",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/6ebe1597-4433-47cf-a155-2c2e61caba1a",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/928188e0-4a2b-4add-9678-cde9914b8582"
+    },
+    {
+      "testId": "94c0a68f-4b32-4d7a-b121-65fde52bf462",
+      "title": "Audit: Protected API authorization",
+      "runId": "ea441779-f851-4b49-8bd2-84fc6f5bdf4b",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/94c0a68f-4b32-4d7a-b121-65fde52bf462",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/928188e0-4a2b-4add-9678-cde9914b8582"
+    },
+    {
+      "testId": "9ead90f0-dbdf-4e08-aa79-223c0f35b440",
+      "title": "Audit: Asset library",
+      "runId": "9aa57f38-fe08-4b69-aeef-be2d6d412d7d",
+      "status": "passed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/9ead90f0-dbdf-4e08-aa79-223c0f35b440",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/928188e0-4a2b-4add-9678-cde9914b8582"
+    },
+    {
+      "testId": "a6bb3360-811a-47f0-b3d1-e9bf1b50d6c7",
+      "title": "Audit: YouTube OAuth initiation and callback boundary",
+      "runId": "e26fb7a1-d630-4382-9b56-043378463a28",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/a6bb3360-811a-47f0-b3d1-e9bf1b50d6c7",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/928188e0-4a2b-4add-9678-cde9914b8582"
+    },
+    {
+      "testId": "b0444c84-480e-4a7a-ba87-6b6930e63ac4",
+      "title": "Audit: Login valid QA credentials",
+      "runId": "c7cdb8f1-b397-4e9f-b888-60196fee5cba",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/b0444c84-480e-4a7a-ba87-6b6930e63ac4",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/928188e0-4a2b-4add-9678-cde9914b8582"
+    },
+    {
+      "testId": "d2c4af1c-b79e-47f4-9c4f-f10c808d5ecd",
+      "title": "Audit: Render output and media",
+      "runId": "d316be02-c52c-40d3-a911-ab3e8c9865ef",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/d2c4af1c-b79e-47f4-9c4f-f10c808d5ecd",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/928188e0-4a2b-4add-9678-cde9914b8582"
+    },
+    {
+      "testId": "80419589-89c2-446b-9833-2c6c12a2f9cc",
+      "title": "Audit: Login rejects invalid credentials without 405",
+      "runId": "5d02f4df-6308-4c97-a057-2debeed11370",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/80419589-89c2-446b-9833-2c6c12a2f9cc",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/928188e0-4a2b-4add-9678-cde9914b8582"
+    },
+    {
+      "testId": "942a9b46-7666-4798-a20f-ecdf121a8edc",
+      "title": "Audit: Tenant isolation with dedicated QA fixtures",
+      "runId": "ea70ec5d-0c65-4d43-b499-812010881048",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/942a9b46-7666-4798-a20f-ecdf121a8edc",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/928188e0-4a2b-4add-9678-cde9914b8582"
+    },
+    {
+      "testId": "85dd67d3-c8c4-4764-8161-194038eb0ea2",
+      "title": "Audit: Authentication persistence and logout",
+      "runId": "005f1e43-c48d-40d0-a3fe-0948218a8907",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/85dd67d3-c8c4-4764-8161-194038eb0ea2",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/928188e0-4a2b-4add-9678-cde9914b8582"
+    },
+    {
+      "testId": "4dc37534-3024-4d71-aa13-3ea78a7c3f60",
+      "status": "conflict",
+      "error": "already in flight (not dispatched)"
+    },
+    {
+      "testId": "791fcc29-8227-477a-bd67-dd37ca183f6f",
+      "status": "conflict",
+      "error": "already in flight (not dispatched)"
+    },
+    {
+      "testId": "cf4d783b-966a-4c70-ac0c-c18c4e598265",
+      "status": "conflict",
+      "error": "already in flight (not dispatched)"
+    }
+  ]
+}

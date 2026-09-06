@@ -1,0 +1,136 @@
+{
+  "total": 16,
+  "passed": 4,
+  "failed": 12,
+  "timedOut": 0,
+  "runs": [
+    {
+      "testId": "152284c1-586c-4486-ae8b-d9cd06ace517",
+      "title": "Audit: Create project and project detail",
+      "runId": "70d0b6fe-c236-42f8-8997-24b12f93d474",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/152284c1-586c-4486-ae8b-d9cd06ace517",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/37d7ae83-8672-4db7-abc9-81bf84a88f2e"
+    },
+    {
+      "testId": "18269415-dd1b-4978-9bdc-b34e62df4075",
+      "title": "Audit: Unknown routes and frontend backend consistency",
+      "runId": "d700c25d-5c5f-4169-b059-71598c97a550",
+      "status": "passed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/18269415-dd1b-4978-9bdc-b34e62df4075",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/37d7ae83-8672-4db7-abc9-81bf84a88f2e"
+    },
+    {
+      "testId": "7f651b39-f586-4ea2-9071-0512023e2be3",
+      "title": "Audit: Landing and static resources",
+      "runId": "c0f994e8-2939-4bc0-98f8-f75ab77b978c",
+      "status": "passed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/7f651b39-f586-4ea2-9071-0512023e2be3",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/37d7ae83-8672-4db7-abc9-81bf84a88f2e"
+    },
+    {
+      "testId": "100efdff-76a2-4268-a953-30cc55893f65",
+      "title": "Audit: Forgot and reset password",
+      "runId": "6a40b23b-32de-4168-979d-e4fa00d2b9a6",
+      "status": "passed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/100efdff-76a2-4268-a953-30cc55893f65",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/37d7ae83-8672-4db7-abc9-81bf84a88f2e"
+    },
+    {
+      "testId": "85dd67d3-c8c4-4764-8161-194038eb0ea2",
+      "title": "Audit: Authentication persistence and logout",
+      "runId": "144aa0b9-27fa-466f-9508-e1ca1f3308e4",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/85dd67d3-c8c4-4764-8161-194038eb0ea2",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/37d7ae83-8672-4db7-abc9-81bf84a88f2e"
+    },
+    {
+      "testId": "868253f1-e6a5-4f82-a95d-01c9b72fa046",
+      "title": "Audit: Dashboard and projects list",
+      "runId": "ba2de84d-bfe9-4443-81cb-384eafde008f",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/868253f1-e6a5-4f82-a95d-01c9b72fa046",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/37d7ae83-8672-4db7-abc9-81bf84a88f2e"
+    },
+    {
+      "testId": "90e19df7-8fa8-40c9-be1b-1518f5d4fb50",
+      "title": "Audit: Analytics and automation",
+      "runId": "ac3d0337-3211-470f-8b5b-e674c0402709",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/90e19df7-8fa8-40c9-be1b-1518f5d4fb50",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/37d7ae83-8672-4db7-abc9-81bf84a88f2e"
+    },
+    {
+      "testId": "942a9b46-7666-4798-a20f-ecdf121a8edc",
+      "title": "Audit: Tenant isolation with dedicated QA fixtures",
+      "runId": "c54fd9d0-f67c-41ca-9e44-dbc4617902fa",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/942a9b46-7666-4798-a20f-ecdf121a8edc",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/37d7ae83-8672-4db7-abc9-81bf84a88f2e"
+    },
+    {
+      "testId": "94c0a68f-4b32-4d7a-b121-65fde52bf462",
+      "title": "Audit: Protected API authorization",
+      "runId": "35e1a77c-4d0a-4c4f-b608-b12505e64802",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/94c0a68f-4b32-4d7a-b121-65fde52bf462",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/37d7ae83-8672-4db7-abc9-81bf84a88f2e"
+    },
+    {
+      "testId": "9ead90f0-dbdf-4e08-aa79-223c0f35b440",
+      "title": "Audit: Asset library",
+      "runId": "ea58f9ec-3e07-48a9-ad12-f7190eb24377",
+      "status": "passed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/9ead90f0-dbdf-4e08-aa79-223c0f35b440",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/37d7ae83-8672-4db7-abc9-81bf84a88f2e"
+    },
+    {
+      "testId": "a6bb3360-811a-47f0-b3d1-e9bf1b50d6c7",
+      "title": "Audit: YouTube OAuth initiation and callback boundary",
+      "runId": "7a88f946-5bc5-4bba-bd55-a7b155aabb80",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/a6bb3360-811a-47f0-b3d1-e9bf1b50d6c7",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/37d7ae83-8672-4db7-abc9-81bf84a88f2e"
+    },
+    {
+      "testId": "b0444c84-480e-4a7a-ba87-6b6930e63ac4",
+      "title": "Audit: Login valid QA credentials",
+      "runId": "0bdd2082-69bf-47ce-8044-6b95b9f9ab35",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/b0444c84-480e-4a7a-ba87-6b6930e63ac4",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/37d7ae83-8672-4db7-abc9-81bf84a88f2e"
+    },
+    {
+      "testId": "d2c4af1c-b79e-47f4-9c4f-f10c808d5ecd",
+      "title": "Audit: Render output and media",
+      "runId": "edb64528-a9d7-403f-9eff-850fecfa2941",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/d2c4af1c-b79e-47f4-9c4f-f10c808d5ecd",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/37d7ae83-8672-4db7-abc9-81bf84a88f2e"
+    },
+    {
+      "testId": "6ebe1597-4433-47cf-a155-2c2e61caba1a",
+      "title": "Audit: QA registration and invite handling",
+      "runId": "2507dfaa-dbc7-48c3-b89d-a6e5accbf6cf",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/6ebe1597-4433-47cf-a155-2c2e61caba1a",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/37d7ae83-8672-4db7-abc9-81bf84a88f2e"
+    },
+    {
+      "testId": "80419589-89c2-446b-9833-2c6c12a2f9cc",
+      "title": "Audit: Login rejects invalid credentials without 405",
+      "runId": "5aee48c1-8fa6-4ffa-a5b6-cc0a1452be9e",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/80419589-89c2-446b-9833-2c6c12a2f9cc",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/37d7ae83-8672-4db7-abc9-81bf84a88f2e"
+    },
+    {
+      "testId": "48b13895-b97c-4b03-b2a7-3dc3d7d10602",
+      "title": "Audit retest: invalid login returns auth error",
+      "runId": "401c4bc5-56da-4a92-895e-1ffcd4b46705",
+      "status": "failed",
+      "dashboardUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/test-cases/48b13895-b97c-4b03-b2a7-3dc3d7d10602",
+      "executionUrl": "https://www.testsprite.com/dashboard-v3/o/bc5b7898-780b-591b-b7c3-b8f51ce5203c/projects/833859c5-d1f8-4034-87af-739b19505cfb/execution/37d7ae83-8672-4db7-abc9-81bf84a88f2e"
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+# Raw recordings may contain QA inputs, cookies or signed artifact URLs.
+runs/
+private/

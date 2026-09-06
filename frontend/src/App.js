@@ -5,6 +5,7 @@ import "@/App.css";
 
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
+import BillingBankTransfer from "@/components/BillingBankTransfer";
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -129,8 +130,8 @@ export default function App() {
             <Route path="/pricing" element={<PricingPage />} />
             <Route path="/app/pricing" element={<Protected><PricingPage /></Protected>} />
             <Route path="/app/automation" element={<Protected><AutomationPage /></Protected>} />
-            <Route path="/billing" element={<Navigate to="/pricing" replace />} />
-            <Route path="/app/billing" element={<Navigate to="/pricing" replace />} />
+            <Route path="/billing" element={<Navigate to="/app/billing" replace />} />
+            <Route path="/app/billing" element={<Protected><BillingBankTransfer /></Protected>} />
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

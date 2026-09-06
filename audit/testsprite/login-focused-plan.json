@@ -1,0 +1,16 @@
+{
+  "projectId": "833859c5-d1f8-4034-87af-739b19505cfb",
+  "type": "frontend",
+  "name": "Audit retest: invalid login returns auth error",
+  "description": "Use the local app only. Enter ff-audit-invalid@example.com and invalid-audit-password. Do not use or create an account. Capture request URL, method, status, content type and sanitized response.",
+  "planSteps": [
+    {
+      "type": "action",
+      "description": "Navigate to /login on the local app. Fill email with ff-audit-invalid@example.com and password with invalid-audit-password, then click Sign in."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify the browser stays on /login and displays an authentication error such as Invalid email or password. Verify the network request is POST /api/auth/login with HTTP 401, JSON content type, and no HTML or secrets."
+    }
+  ]
+}

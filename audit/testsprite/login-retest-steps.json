@@ -1,0 +1,12 @@
+{
+  "planSteps": [
+    {
+      "type": "action",
+      "description": "Production safety: Never delete existing data, publish, alter settings, bypass auth, expose credentials/cookies/tokens, or mock a flow. Capture exact actions and sanitized request URL, method, status and relevant response on failures. Open /login; enter nonexistent ff-audit-invalid@example.com and a randomly generated password; click Sign in. Capture sanitized request method, URL, status, response and visible error."
+    },
+    {
+      "type": "assertion",
+      "description": "Login returns an authentication error (401/400), displays a helpful error and remains signed out; never 405, HTML, or 5xx."
+    }
+  ]
+}

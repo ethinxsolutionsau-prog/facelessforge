@@ -164,7 +164,7 @@ export default function LandingPage() {
             </Link>
           </div>
 
-          <div className="mt-20 grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="mt-20 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
               { icon: Sparkles, title: "Create", body: "DeepSeek writes hooks, scripts, scenes, and metadata tuned to your niche." },
               { icon: Layers, title: "Automate", body: "Every project moves through a visible 8-step production pipeline." },

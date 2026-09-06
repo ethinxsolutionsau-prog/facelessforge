@@ -33,6 +33,8 @@ let webpackConfig = {
       '@': path.resolve(__dirname, 'src'),
     },
     configure: (webpackConfig) => {
+      // The app imports TSX components alongside its JavaScript pages.
+      webpackConfig.resolve.extensions.push(".ts", ".tsx");
 
       // Add ignored patterns to reduce watched directories
         webpackConfig.watchOptions = {

@@ -33,6 +33,8 @@ async def ensure_indexes():
         await db.forge_runs.create_index("id", unique=True, sparse=True)
         await db.niches.create_index("name", unique=True)
         await db.youtube_tokens.create_index("id", unique=True)
+        await db.longform_projects.create_index("id", unique=True)
+        await db.longform_projects.create_index("user_id")
         # seed niches if empty
         if await db.niches.count_documents({}) == 0:
             import uuid
